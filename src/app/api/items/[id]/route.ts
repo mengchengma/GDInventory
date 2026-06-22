@@ -11,13 +11,15 @@ async function guard() {
 
 type Ctx = { params: Promise<{ id: string }> };
 
+const NON_NEG_INT_FIELDS = ["cases", "loose_units", "min_threshold"] as const;
+
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   const unauthorized = await guard();
   if (unauthorized) return unauthorized;
 
   const { id } = await ctx.params;
 
-  let body: { name?: string; quantity?: number; notes?: string };
+  let body: Record<string, unknown>;
   try {
     body = await req.json();
   } catch {
@@ -25,6 +27,7 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
   }
 
   const patch: Record<string, unknown> = {};
+
   if (body.name !== undefined) {
     const name = String(body.name).trim();
     if (!name) {
@@ -32,15 +35,41 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     }
     patch.name = name;
   }
-  if (body.quantity !== undefined) {
-    const q = Number(body.quantity);
-    if (!Number.isFinite(q)) {
-      return NextResponse.json({ error: "Invalid quantity" }, { status: 400 });
-    }
-    patch.quantity = Math.max(0, Math.trunc(q));
+
+  if (body.category !== undefined) {
+    patch.category = String(body.category).trim();
   }
+
   if (body.notes !== undefined) {
     patch.notes = String(body.notes);
+  }
+
+  if (body.archived !== undefined) {
+    patch.archived = Boolean(body.archived);
+  }
+
+  if (body.units_per_case !== undefined) {
+    const n = Number(body.units_per_case);
+    if (!Number.isFinite(n) || n < 1) {
+      return NextResponse.json(
+        { error: "units_per_case must be at least 1" },
+        { status: 400 }
+      );
+    }
+    patch.units_per_case = Math.trunc(n);
+  }
+
+  for (const field of NON_NEG_INT_FIELDS) {
+    if (body[field] !== undefined) {
+      const n = Number(body[field]);
+      if (!Number.isFinite(n) || n < 0) {
+        return NextResponse.json(
+          { error: `${field} must be a non-negative number` },
+          { status: 400 }
+        );
+      }
+      patch[field] = Math.trunc(n);
+    }
   }
 
   if (Object.keys(patch).length === 0) {

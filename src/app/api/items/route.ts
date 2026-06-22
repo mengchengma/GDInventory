@@ -9,16 +9,33 @@ async function guard() {
   return null;
 }
 
-export async function GET() {
+function toNonNegativeInt(value: unknown, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(0, Math.trunc(n));
+}
+
+export async function GET(req: NextRequest) {
   const unauthorized = await guard();
   if (unauthorized) return unauthorized;
 
+  const archivedParam = req.nextUrl.searchParams.get("archived");
+  // "true" → archived only, "all" → both, default → active only
+  const includeArchived = archivedParam === "all";
+  const onlyArchived = archivedParam === "true";
+
   const sb = getSupabase();
-  const { data, error } = await sb
+  let query = sb
     .from("items")
     .select("*")
-    .order("created_at", { ascending: false });
+    .order("category", { ascending: true })
+    .order("created_at", { ascending: true });
 
+  if (!includeArchived) {
+    query = query.eq("archived", onlyArchived);
+  }
+
+  const { data, error } = await query;
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
@@ -29,7 +46,15 @@ export async function POST(req: NextRequest) {
   const unauthorized = await guard();
   if (unauthorized) return unauthorized;
 
-  let body: { name?: string; quantity?: number; notes?: string };
+  let body: {
+    name?: string;
+    category?: string;
+    units_per_case?: number;
+    cases?: number;
+    loose_units?: number;
+    min_threshold?: number;
+    notes?: string;
+  };
   try {
     body = await req.json();
   } catch {
@@ -41,15 +66,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 });
   }
 
-  const quantity = Number.isFinite(body.quantity)
-    ? Math.max(0, Math.trunc(Number(body.quantity)))
-    : 0;
-  const notes = String(body.notes ?? "");
+  const insert = {
+    name,
+    category: String(body.category ?? "").trim(),
+    units_per_case: Math.max(1, toNonNegativeInt(body.units_per_case, 1)),
+    cases: toNonNegativeInt(body.cases, 0),
+    loose_units: toNonNegativeInt(body.loose_units, 0),
+    min_threshold: toNonNegativeInt(body.min_threshold, 0),
+    notes: String(body.notes ?? ""),
+  };
 
   const sb = getSupabase();
   const { data, error } = await sb
     .from("items")
-    .insert({ name, quantity, notes })
+    .insert(insert)
     .select()
     .single();
 
