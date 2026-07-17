@@ -5,7 +5,8 @@ export function middleware(req: NextRequest) {
 
   const isLoginPage = pathname === "/login";
   const isLoginApi = pathname === "/api/login";
-  const isPublic = isLoginPage || isLoginApi;
+  const isPingApi = pathname === "/api/ping";
+  const isPublic = isLoginPage || isLoginApi || isPingApi;
 
   const token = req.cookies.get("gd_auth")?.value;
   const hasSession = Boolean(token);
