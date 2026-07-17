@@ -86,6 +86,7 @@ export default function InventoryClient() {
   const [showBulkImport, setShowBulkImport] = useState(false);
   const [editing, setEditing] = useState<Item | null>(null);
   const [showArchived, setShowArchived] = useState(false);
+  const [stockFilter, setStockFilter] = useState<"all" | "low" | "out">("all");
   const [sortBy, setSortBy] = useState<SortOption>("recent");
 
   // Hydrate sort preference from localStorage
@@ -246,6 +247,11 @@ export default function InventoryClient() {
     return visibleItems.filter((it) => {
       const cat = it.category || UNCATEGORIZED;
       if (activeCategory !== "All" && cat !== activeCategory) return false;
+      if (stockFilter !== "all") {
+        const s = stockState(it);
+        if (stockFilter === "low" && s !== "low") return false;
+        if (stockFilter === "out" && s !== "out") return false;
+      }
       if (!q) return true;
       return (
         it.name.toLowerCase().includes(q) ||
@@ -253,7 +259,12 @@ export default function InventoryClient() {
         cat.toLowerCase().includes(q)
       );
     });
-  }, [visibleItems, query, activeCategory]);
+  }, [visibleItems, query, activeCategory, stockFilter]);
+
+  const flatItems = useMemo(
+    () => sortItems(filtered, sortBy),
+    [filtered, sortBy]
+  );
 
   const grouped = useMemo(() => {
     const map = new Map<string, Item[]>();
@@ -298,7 +309,19 @@ export default function InventoryClient() {
 
   return (
     <main className="mx-auto max-w-6xl px-4 py-6 sm:px-6 sm:py-8">
-      <TopBar stats={stats} onLogout={logout} />
+      <TopBar
+        stats={stats}
+        activeStockFilter={stockFilter}
+        onFilterLow={() => {
+          setStockFilter((v) => (v === "low" ? "all" : "low"));
+          setActiveCategory("All");
+        }}
+        onFilterOut={() => {
+          setStockFilter((v) => (v === "out" ? "all" : "out"));
+          setActiveCategory("All");
+        }}
+        onLogout={logout}
+      />
 
       <div className="mt-5 flex flex-col gap-3 sm:flex-row">
         <div className="relative flex-1">
@@ -426,8 +449,26 @@ export default function InventoryClient() {
       )}
 
       <div className="mt-5">
+        {stockFilter !== "all" && (
+          <StockFilterBanner
+            kind={stockFilter}
+            count={flatItems.length}
+            onClear={() => setStockFilter("all")}
+          />
+        )}
+
         {loading ? (
           <SkeletonList />
+        ) : stockFilter !== "all" ? (
+          flatItems.length === 0 ? (
+            <EmptyStockState kind={stockFilter} />
+          ) : (
+            <FlatItemList
+              items={flatItems}
+              onPatch={patchItem}
+              onEdit={(it) => setEditing(it)}
+            />
+          )
         ) : grouped.length === 0 ? (
           <EmptyState
             mode={
@@ -499,9 +540,15 @@ export default function InventoryClient() {
 
 function TopBar({
   stats,
+  activeStockFilter,
+  onFilterLow,
+  onFilterOut,
   onLogout,
 }: {
   stats: { cases: number; units: number; low: number; outOfStock: number };
+  activeStockFilter: "all" | "low" | "out";
+  onFilterLow: () => void;
+  onFilterOut: () => void;
   onLogout: () => void;
 }) {
   return (
@@ -543,8 +590,20 @@ function TopBar({
       <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
         <StatBox label="Total cases" value={stats.cases} />
         <StatBox label="Total units" value={stats.units} tone="emerald" />
-        <StatBox label="Low stock" value={stats.low} tone="amber" />
-        <StatBox label="Out of stock" value={stats.outOfStock} tone="danger" />
+        <StatBox
+          label="Low stock"
+          value={stats.low}
+          tone="amber"
+          onClick={onFilterLow}
+          active={activeStockFilter === "low"}
+        />
+        <StatBox
+          label="Out of stock"
+          value={stats.outOfStock}
+          tone="danger"
+          onClick={onFilterOut}
+          active={activeStockFilter === "out"}
+        />
       </div>
     </header>
   );
@@ -554,10 +613,14 @@ function StatBox({
   label,
   value,
   tone = "default",
+  onClick,
+  active = false,
 }: {
   label: string;
   value: number;
   tone?: "default" | "emerald" | "amber" | "danger";
+  onClick?: () => void;
+  active?: boolean;
 }) {
   let toneClasses = "border-zinc-800 bg-zinc-900/60 text-zinc-100";
   if (tone === "emerald") {
@@ -574,15 +637,31 @@ function StatBox({
         : "border-zinc-800 bg-zinc-900/60 text-zinc-300";
   }
 
+  const activeRing =
+    active && tone === "amber"
+      ? "ring-2 ring-amber-500/40"
+      : active && tone === "danger"
+        ? "ring-2 ring-red-500/40"
+        : "";
+  const interactive = onClick
+    ? "cursor-pointer transition hover:brightness-125 active:scale-[0.98]"
+    : "";
+
+  const Wrapper = onClick ? "button" : "div";
+
   return (
-    <div className={`rounded-xl border px-3 py-3 sm:px-4 sm:py-3.5 ${toneClasses}`}>
+    <Wrapper
+      type={onClick ? "button" : undefined}
+      onClick={onClick}
+      className={`rounded-xl border px-3 py-3 text-left sm:px-4 sm:py-3.5 ${toneClasses} ${activeRing} ${interactive}`}
+    >
       <div className="text-[10px] font-medium uppercase tracking-wider text-zinc-500 sm:text-[11px]">
         {label}
       </div>
       <div className="mt-0.5 text-xl font-bold tabular-nums sm:text-2xl">
         {value}
       </div>
-    </div>
+    </Wrapper>
   );
 }
 
@@ -863,6 +942,118 @@ function Field({
   );
 }
 
+function StockFilterBanner({
+  kind,
+  count,
+  onClear,
+}: {
+  kind: "low" | "out";
+  count: number;
+  onClear: () => void;
+}) {
+  const tone =
+    kind === "low"
+      ? "border-amber-500/30 bg-amber-500/5 text-amber-200"
+      : "border-red-500/30 bg-red-500/5 text-red-200";
+  const label = kind === "low" ? "low-stock" : "out-of-stock";
+
+  return (
+    <div
+      className={`mb-4 flex items-center justify-between gap-3 rounded-lg border px-3 py-2 text-xs ${tone}`}
+    >
+      <span>
+        Showing <span className="font-semibold tabular-nums">{count}</span>{" "}
+        {label} item{count === 1 ? "" : "s"}
+      </span>
+      <button
+        onClick={onClear}
+        className="rounded-md border border-current/30 px-2 py-0.5 text-[11px] font-medium hover:bg-current/10"
+      >
+        Clear filter
+      </button>
+    </div>
+  );
+}
+
+function FlatItemList({
+  items,
+  onPatch,
+  onEdit,
+}: {
+  items: Item[];
+  onPatch: (id: string, patch: Partial<Item>) => Promise<Item>;
+  onEdit: (item: Item) => void;
+}) {
+  return (
+    <div>
+      <div className="hidden grid-cols-[1fr_140px_140px_90px_36px] gap-3 px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-zinc-500 sm:grid">
+        <div>Item</div>
+        <div className="text-center">Cases</div>
+        <div className="text-center">Loose units</div>
+        <div className="text-right">Total</div>
+        <div />
+      </div>
+      <div className="divide-y divide-zinc-900 rounded-xl border border-zinc-800/70 bg-zinc-900/30">
+        {items.map((it) => (
+          <ItemRow
+            key={it.id}
+            item={it}
+            onPatch={onPatch}
+            onEdit={onEdit}
+            showCategory
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function EmptyStockState({ kind }: { kind: "low" | "out" }) {
+  const label = kind === "low" ? "low-stock" : "out-of-stock";
+  const icon =
+    kind === "low" ? (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-6 w-6 text-amber-400"
+      >
+        <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3ZM12 9v4M12 17h.01" />
+      </svg>
+    ) : (
+      <svg
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        className="h-6 w-6 text-emerald-400"
+      >
+        <path d="M20 6 9 17l-5-5" />
+      </svg>
+    );
+
+  return (
+    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-zinc-800 bg-zinc-900/20 px-6 py-14 text-center">
+      <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-zinc-800/60">
+        {icon}
+      </div>
+      <p className="text-sm font-medium text-zinc-300">
+        {kind === "out"
+          ? "Nothing is out of stock"
+          : "Nothing is running low"}
+      </p>
+      <p className="mt-1 text-xs text-zinc-500">
+        No {label} items right now.
+      </p>
+    </div>
+  );
+}
+
 function CategorySection({
   category,
   items,
@@ -965,10 +1156,12 @@ function ItemRow({
   item,
   onPatch,
   onEdit,
+  showCategory = false,
 }: {
   item: Item;
   onPatch: (id: string, patch: Partial<Item>) => Promise<Item>;
   onEdit: (item: Item) => void;
+  showCategory?: boolean;
 }) {
   const t = totalUnits(item);
   const state = stockState(item);
@@ -1016,6 +1209,14 @@ function ItemRow({
           )}
         </div>
         <div className="mt-0.5 flex items-center gap-2 text-[11px] text-zinc-500">
+          {showCategory && (
+            <>
+              <span className="rounded-sm bg-zinc-800/70 px-1.5 py-px text-[10px] font-medium uppercase tracking-wider text-zinc-400">
+                {item.category || UNCATEGORIZED}
+              </span>
+              <span className="text-zinc-700">•</span>
+            </>
+          )}
           <span>{item.units_per_case} units/case</span>
           {item.min_threshold > 0 && (
             <>
