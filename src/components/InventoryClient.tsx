@@ -8,6 +8,7 @@ import {
   KeyboardEvent,
 } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import BulkImportModal from "@/components/BulkImportModal";
 
 type Item = {
@@ -581,10 +582,8 @@ function TopBar({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          <a
+          <Link
             href="/events"
-            target="_blank"
-            rel="noopener"
             className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-emerald-500/40 hover:bg-emerald-500/5 hover:text-emerald-300"
           >
             <svg
@@ -602,7 +601,7 @@ function TopBar({
               <path d="m21 15-4.5-4.5-9 9" />
             </svg>
             Events
-          </a>
+          </Link>
           <button
             onClick={onLogout}
             className="rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-100"

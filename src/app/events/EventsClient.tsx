@@ -10,6 +10,11 @@ import {
   useRef,
   useState,
 } from "react";
+import {
+  DEFAULT_SETTINGS,
+  loadSettings,
+  type SlideshowSettings,
+} from "@/lib/eventSettings";
 
 type Event = {
   id: string;
@@ -24,10 +29,37 @@ type Event = {
   updated_at: string;
 };
 
-const AUTO_ADVANCE_MS = 6000;
-
 export default function EventsClient() {
   const router = useRouter();
+  const [settings, setSettings] = useState<SlideshowSettings>(DEFAULT_SETTINGS);
+  const stageRef = useRef<HTMLElement>(null);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  // Load settings on mount + on focus (so returning from settings page picks up changes)
+  useEffect(() => {
+    setSettings(loadSettings());
+    const onFocus = () => setSettings(loadSettings());
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
+
+  useEffect(() => {
+    const onChange = () => setIsFullscreen(Boolean(document.fullscreenElement));
+    document.addEventListener("fullscreenchange", onChange);
+    return () => document.removeEventListener("fullscreenchange", onChange);
+  }, []);
+
+  const toggleFullscreen = useCallback(async () => {
+    try {
+      if (document.fullscreenElement) {
+        await document.exitFullscreen();
+      } else if (stageRef.current) {
+        await stageRef.current.requestFullscreen();
+      }
+    } catch {
+      /* browser blocked / not supported — ignore */
+    }
+  }, []);
   const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -58,14 +90,14 @@ export default function EventsClient() {
     loadEvents();
   }, [loadEvents]);
 
-  // Auto-advance
+  // Auto-advance (speed comes from settings)
   useEffect(() => {
     if (!isPlaying || events.length < 2) return;
     const id = setInterval(() => {
       setIndex((i) => (i + 1) % events.length);
-    }, AUTO_ADVANCE_MS);
+    }, settings.speedMs);
     return () => clearInterval(id);
-  }, [isPlaying, events.length]);
+  }, [isPlaying, events.length, settings.speedMs]);
 
   // Clamp index if events shrink
   useEffect(() => {
@@ -171,7 +203,11 @@ export default function EventsClient() {
         </div>
       )}
 
-      <main className="relative flex flex-1 flex-col">
+      <main
+        ref={stageRef}
+        className="relative flex flex-1 flex-col"
+        style={{ background: settings.background }}
+      >
         {loading ? (
           <SlideshowSkeleton />
         ) : events.length === 0 ? (
@@ -185,6 +221,10 @@ export default function EventsClient() {
             isPlaying={isPlaying}
             hasMultiple={events.length > 1}
             onEdit={() => setEditing(currentEvent)}
+            fit={settings.fit}
+            background={settings.background}
+            onToggleFullscreen={toggleFullscreen}
+            isFullscreen={isFullscreen}
           />
         )}
 
@@ -265,12 +305,50 @@ function TopBar({
         <div className="text-sm font-semibold text-zinc-100">Events</div>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         {count > 0 && (
           <span className="hidden text-[11px] tabular-nums text-zinc-500 sm:inline">
             {currentIndex + 1} / {count}
           </span>
         )}
+        <Link
+          href="/events/manage"
+          className="hidden items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-100 sm:inline-flex"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-3.5 w-3.5"
+          >
+            <rect x="3" y="3" width="7" height="7" rx="1" />
+            <rect x="14" y="3" width="7" height="7" rx="1" />
+            <rect x="3" y="14" width="7" height="7" rx="1" />
+            <rect x="14" y="14" width="7" height="7" rx="1" />
+          </svg>
+          Manage
+        </Link>
+        <Link
+          href="/events/settings"
+          className="hidden items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-zinc-700 hover:bg-zinc-800 hover:text-zinc-100 sm:inline-flex"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-3.5 w-3.5"
+          >
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+          </svg>
+          Settings
+        </Link>
         <button
           onClick={onAddClick}
           className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-zinc-950 transition hover:bg-emerald-400"
@@ -301,6 +379,10 @@ function SlideshowStage({
   isPlaying,
   hasMultiple,
   onEdit,
+  fit,
+  background,
+  onToggleFullscreen,
+  isFullscreen,
 }: {
   event: Event;
   onNext: () => void;
@@ -309,6 +391,10 @@ function SlideshowStage({
   isPlaying: boolean;
   hasMultiple: boolean;
   onEdit: () => void;
+  fit: "contain" | "cover";
+  background: string;
+  onToggleFullscreen: () => void;
+  isFullscreen: boolean;
 }) {
   const dateLabel = useMemo(
     () => formatDateTime(event.event_date, event.event_time),
@@ -316,7 +402,10 @@ function SlideshowStage({
   );
 
   return (
-    <div className="relative flex flex-1 items-center justify-center overflow-hidden bg-black">
+    <div
+      className="relative flex flex-1 items-center justify-center overflow-hidden"
+      style={{ background }}
+    >
       {/* Image */}
       <button
         type="button"
@@ -329,12 +418,50 @@ function SlideshowStage({
           key={event.id}
           src={event.image_url}
           alt={event.title}
-          className="max-h-full max-w-full object-contain animate-[fade_400ms_ease-out]"
+          className={`animate-[fade_400ms_ease-out] ${
+            fit === "cover"
+              ? "h-full w-full object-cover"
+              : "max-h-full max-w-full object-contain"
+          }`}
         />
         {!isPlaying && (
           <span className="pointer-events-none absolute rounded-full bg-black/60 px-4 py-2 text-xs font-medium uppercase tracking-[0.2em] text-white/80 opacity-0 transition group-hover:opacity-100">
             Paused
           </span>
+        )}
+      </button>
+
+      {/* Fullscreen button */}
+      <button
+        type="button"
+        onClick={onToggleFullscreen}
+        aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
+        className="absolute right-3 top-3 z-10 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-black/50 text-white/80 backdrop-blur transition hover:border-white/30 hover:bg-black/70 hover:text-white"
+      >
+        {isFullscreen ? (
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-4 w-4"
+          >
+            <path d="M8 3v4a1 1 0 0 1-1 1H3M16 3v4a1 1 0 0 0 1 1h4M8 21v-4a1 1 0 0 0-1-1H3M16 21v-4a1 1 0 0 1 1-1h4" />
+          </svg>
+        ) : (
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="h-4 w-4"
+          >
+            <path d="M3 8V4a1 1 0 0 1 1-1h4M16 3h4a1 1 0 0 1 1 1v4M21 16v4a1 1 0 0 1-1 1h-4M8 21H4a1 1 0 0 1-1-1v-4" />
+          </svg>
         )}
       </button>
 
