@@ -7,6 +7,7 @@ export type CalendarEvent = {
   title: string;
   event_date: string | null;
   event_time: string | null;
+  image_url: string;
 };
 
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -99,15 +100,24 @@ function DayCell({ cell }: { cell: Cell }) {
         {cell.events.slice(0, 2).map((e) => (
           <div
             key={e.id}
-            className="truncate rounded bg-emerald-500/20 px-1 py-0.5 text-[9px] font-medium leading-tight text-emerald-100 sm:text-[11px]"
+            className="flex min-w-0 items-center gap-1 rounded bg-emerald-500/20 px-0.5 py-0.5 sm:gap-1.5 sm:px-1"
             title={e.title}
           >
-            {e.event_time && (
-              <span className="mr-1 tabular-nums text-emerald-300/80">
-                {formatTimeShort(e.event_time)}
-              </span>
-            )}
-            {e.title}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={e.image_url}
+              alt=""
+              className="h-3.5 w-3.5 shrink-0 rounded-[3px] object-cover sm:h-5 sm:w-5"
+              loading="lazy"
+            />
+            <span className="min-w-0 truncate text-[9px] font-medium leading-tight text-emerald-100 sm:text-[11px]">
+              {e.event_time && (
+                <span className="mr-1 tabular-nums text-emerald-300/80">
+                  {formatTimeShort(e.event_time)}
+                </span>
+              )}
+              {e.title}
+            </span>
           </div>
         ))}
         {cell.events.length > 2 && (
