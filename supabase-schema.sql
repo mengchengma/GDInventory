@@ -46,3 +46,28 @@ drop trigger if exists items_set_updated_at on items;
 create trigger items_set_updated_at
 before update on items
 for each row execute function set_updated_at();
+
+-- Events (photo slideshow)
+
+create table if not exists events (
+  id uuid primary key default gen_random_uuid(),
+  title text not null,
+  description text not null default '',
+  event_date date,
+  event_time time,
+  image_url text not null,
+  image_key text,
+  sort_order integer not null default 0,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table events add column if not exists event_time time;
+
+create index if not exists events_sort_idx
+  on events (sort_order asc, event_date desc nulls last, created_at desc);
+
+drop trigger if exists events_set_updated_at on events;
+create trigger events_set_updated_at
+before update on events
+for each row execute function set_updated_at();
