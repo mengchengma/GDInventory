@@ -58,7 +58,7 @@ export default function CalendarSlide({
         ))}
       </div>
 
-      <div className="grid flex-1 grid-cols-7 gap-1 sm:gap-1.5">
+      <div className="grid flex-1 auto-rows-fr grid-cols-7 gap-1 sm:gap-1.5">
         {Array.from({ length: leadingBlanks }).map((_, i) => (
           <div key={`blank-${i}`} />
         ))}
@@ -72,59 +72,69 @@ export default function CalendarSlide({
 
 function DayCell({ cell }: { cell: Cell }) {
   const hasEvents = cell.events.length > 0;
+  const hero = cell.events[0];
+  const extra = cell.events.length - 1;
 
-  const base =
-    "relative flex min-h-0 flex-col overflow-hidden rounded-lg border p-1 sm:p-1.5 transition";
-  const tone = cell.isToday
-    ? "border-emerald-400/70 bg-emerald-400/10 ring-1 ring-emerald-400/40"
+  const ring = cell.isToday
+    ? "border-emerald-400/70 ring-1 ring-emerald-400/50"
     : hasEvents
-      ? "border-emerald-500/25 bg-emerald-500/[0.06]"
-      : "border-white/[0.06] bg-white/[0.02]";
-  const dim = cell.isPast && !cell.isToday ? "opacity-40" : "";
+      ? "border-emerald-500/25"
+      : "border-white/[0.06]";
+  const dim = cell.isPast && !cell.isToday ? "opacity-45" : "";
 
-  return (
-    <div className={`${base} ${tone} ${dim}`}>
+  // Empty day — just the number on a faint tile.
+  if (!hero) {
+    return (
       <div
-        className={`mb-0.5 shrink-0 text-right text-[11px] font-semibold tabular-nums sm:text-sm ${
-          cell.isToday
-            ? "text-emerald-300"
-            : hasEvents
-              ? "text-white/80"
-              : "text-white/40"
-        }`}
+        className={`relative flex min-h-0 items-start justify-end overflow-hidden rounded-lg border bg-white/[0.02] p-1 sm:p-1.5 ${ring} ${dim}`}
       >
-        {cell.day}
+        <span
+          className={`text-[11px] font-semibold tabular-nums sm:text-sm ${
+            cell.isToday ? "text-emerald-300" : "text-white/35"
+          }`}
+        >
+          {cell.day}
+        </span>
       </div>
+    );
+  }
 
-      <div className="flex min-h-0 flex-1 flex-col gap-0.5 overflow-hidden">
-        {cell.events.slice(0, 2).map((e) => (
-          <div
-            key={e.id}
-            className="flex min-w-0 items-center gap-1 rounded bg-emerald-500/20 px-0.5 py-0.5 sm:gap-1.5 sm:px-1"
-            title={e.title}
-          >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={e.image_url}
-              alt=""
-              className="h-3.5 w-3.5 shrink-0 rounded-[3px] object-cover sm:h-5 sm:w-5"
-              loading="lazy"
-            />
-            <span className="min-w-0 truncate text-[9px] font-medium leading-tight text-emerald-100 sm:text-[11px]">
-              {e.event_time && (
-                <span className="mr-1 tabular-nums text-emerald-300/80">
-                  {formatTimeShort(e.event_time)}
-                </span>
-              )}
-              {e.title}
+  // Day with events — the photo is the tile.
+  return (
+    <div
+      className={`group relative min-h-0 overflow-hidden rounded-lg border ${ring} ${dim}`}
+      title={cell.events.map((e) => e.title).join(" · ")}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={hero.image_url}
+        alt=""
+        className="absolute inset-0 h-full w-full object-cover"
+        loading="lazy"
+      />
+
+      {/* Legibility scrim: darker at the bottom for the title, light veil up top for the date */}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/90 via-black/25 to-black/40" />
+
+      <div className="relative flex h-full flex-col justify-between p-1 sm:p-1.5">
+        <div className="flex items-start justify-end gap-1">
+          {extra > 0 && (
+            <span className="rounded-sm bg-emerald-500/85 px-1 text-[8px] font-bold leading-[1.4] text-zinc-950 sm:text-[10px]">
+              +{extra}
             </span>
-          </div>
-        ))}
-        {cell.events.length > 2 && (
-          <div className="px-1 text-[9px] font-medium text-emerald-300/70 sm:text-[10px]">
-            +{cell.events.length - 2} more
-          </div>
-        )}
+          )}
+          <span
+            className={`text-[11px] font-bold tabular-nums drop-shadow-[0_1px_3px_rgba(0,0,0,0.9)] sm:text-sm ${
+              cell.isToday ? "text-emerald-300" : "text-white"
+            }`}
+          >
+            {cell.day}
+          </span>
+        </div>
+
+        <div className="min-w-0 truncate text-[8px] font-semibold leading-tight text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.95)] sm:text-[11px]">
+          {hero.title}
+        </div>
       </div>
     </div>
   );
@@ -187,11 +197,3 @@ function toIso(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
-function formatTimeShort(t: string): string {
-  const [hStr, mStr] = t.split(":");
-  const h = Number(hStr);
-  if (!Number.isFinite(h)) return t;
-  const suffix = h >= 12 ? "p" : "a";
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return mStr && mStr !== "00" ? `${h12}:${mStr}${suffix}` : `${h12}${suffix}`;
-}
