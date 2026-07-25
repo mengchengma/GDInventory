@@ -15,6 +15,7 @@ import {
   loadSettings,
   type SlideshowSettings,
 } from "@/lib/eventSettings";
+import CalendarSlide from "./CalendarSlide";
 
 type Event = {
   id: string;
@@ -28,6 +29,8 @@ type Event = {
   created_at: string;
   updated_at: string;
 };
+
+type Slide = { kind: "event"; event: Event } | { kind: "calendar" };
 
 export default function EventsClient() {
   const router = useRouter();
@@ -90,28 +93,47 @@ export default function EventsClient() {
     loadEvents();
   }, [loadEvents]);
 
-  // Auto-advance (speed comes from settings)
-  useEffect(() => {
-    if (!isPlaying || events.length < 2) return;
-    const id = setInterval(() => {
-      setIndex((i) => (i + 1) % events.length);
-    }, settings.speedMs);
-    return () => clearInterval(id);
-  }, [isPlaying, events.length, settings.speedMs]);
+  // The rotation: photo slides, optionally with a calendar slide bookending them.
+  const slides = useMemo<Slide[]>(() => {
+    const eventSlides: Slide[] = events.map((event) => ({
+      kind: "event",
+      event,
+    }));
+    if (!settings.showCalendar || events.length === 0) return eventSlides;
+    const calendar: Slide = { kind: "calendar" };
+    return settings.calendarPosition === "first"
+      ? [calendar, ...eventSlides]
+      : [...eventSlides, calendar];
+  }, [events, settings.showCalendar, settings.calendarPosition]);
 
-  // Clamp index if events shrink
+  const currentSlide = slides[index];
+  const currentDuration =
+    currentSlide?.kind === "calendar"
+      ? settings.calendarDurationMs
+      : settings.speedMs;
+
+  // Auto-advance — each slide type can have its own duration.
   useEffect(() => {
-    if (index >= events.length && events.length > 0) setIndex(0);
-  }, [events.length, index]);
+    if (!isPlaying || slides.length < 2) return;
+    const id = setTimeout(() => {
+      setIndex((i) => (i + 1) % slides.length);
+    }, currentDuration);
+    return () => clearTimeout(id);
+  }, [isPlaying, slides.length, currentDuration, index]);
+
+  // Clamp index if the rotation shrinks
+  useEffect(() => {
+    if (index >= slides.length && slides.length > 0) setIndex(0);
+  }, [slides.length, index]);
 
   const goNext = useCallback(() => {
-    if (events.length === 0) return;
-    setIndex((i) => (i + 1) % events.length);
-  }, [events.length]);
+    if (slides.length === 0) return;
+    setIndex((i) => (i + 1) % slides.length);
+  }, [slides.length]);
   const goPrev = useCallback(() => {
-    if (events.length === 0) return;
-    setIndex((i) => (i - 1 + events.length) % events.length);
-  }, [events.length]);
+    if (slides.length === 0) return;
+    setIndex((i) => (i - 1 + slides.length) % slides.length);
+  }, [slides.length]);
   const togglePlay = useCallback(() => setIsPlaying((v) => !v), []);
 
   // Keyboard shortcuts
@@ -133,8 +155,6 @@ export default function EventsClient() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [goNext, goPrev, togglePlay]);
-
-  const currentEvent = events[index];
 
   async function addEvent(input: {
     title: string;
@@ -186,7 +206,7 @@ export default function EventsClient() {
   return (
     <div className="flex min-h-screen flex-col">
       <TopBar
-        count={events.length}
+        count={slides.length}
         currentIndex={index}
         onAddClick={() => setShowAdd(true)}
       />
@@ -210,17 +230,20 @@ export default function EventsClient() {
       >
         {loading ? (
           <SlideshowSkeleton />
-        ) : events.length === 0 ? (
+        ) : slides.length === 0 || !currentSlide ? (
           <EmptyEventsState onAdd={() => setShowAdd(true)} />
         ) : (
           <SlideshowStage
-            event={currentEvent}
+            slide={currentSlide}
+            allEvents={events}
             onNext={goNext}
             onPrev={goPrev}
             onTogglePlay={togglePlay}
             isPlaying={isPlaying}
-            hasMultiple={events.length > 1}
-            onEdit={() => setEditing(currentEvent)}
+            hasMultiple={slides.length > 1}
+            onEdit={() =>
+              currentSlide.kind === "event" && setEditing(currentSlide.event)
+            }
             fit={settings.fit}
             background={settings.background}
             onToggleFullscreen={toggleFullscreen}
@@ -228,10 +251,10 @@ export default function EventsClient() {
           />
         )}
 
-        {events.length > 0 && (
+        {slides.length > 0 && (
           <SlideshowControls
             index={index}
-            total={events.length}
+            total={slides.length}
             isPlaying={isPlaying}
             onPrev={goPrev}
             onNext={goNext}
@@ -372,7 +395,8 @@ function TopBar({
 }
 
 function SlideshowStage({
-  event,
+  slide,
+  allEvents,
   onNext,
   onPrev,
   onTogglePlay,
@@ -384,7 +408,8 @@ function SlideshowStage({
   onToggleFullscreen,
   isFullscreen,
 }: {
-  event: Event;
+  slide: Slide;
+  allEvents: Event[];
   onNext: () => void;
   onPrev: () => void;
   onTogglePlay: () => void;
@@ -396,9 +421,10 @@ function SlideshowStage({
   onToggleFullscreen: () => void;
   isFullscreen: boolean;
 }) {
+  const event = slide.kind === "event" ? slide.event : null;
   const dateLabel = useMemo(
-    () => formatDateTime(event.event_date, event.event_time),
-    [event.event_date, event.event_time]
+    () => (event ? formatDateTime(event.event_date, event.event_time) : null),
+    [event]
   );
 
   return (
@@ -406,24 +432,30 @@ function SlideshowStage({
       className="relative flex flex-1 items-center justify-center overflow-hidden"
       style={{ background }}
     >
-      {/* Image */}
+      {/* Slide body */}
       <button
         type="button"
         onClick={onTogglePlay}
         className="group absolute inset-0 flex items-center justify-center focus:outline-none"
         aria-label={isPlaying ? "Pause slideshow" : "Resume slideshow"}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          key={event.id}
-          src={event.image_url}
-          alt={event.title}
-          className={`animate-[fade_400ms_ease-out] ${
-            fit === "cover"
-              ? "h-full w-full object-cover"
-              : "max-h-full max-w-full object-contain"
-          }`}
-        />
+        {slide.kind === "calendar" ? (
+          <div className="h-full w-full animate-[fade_400ms_ease-out]">
+            <CalendarSlide events={allEvents} />
+          </div>
+        ) : (
+          /* eslint-disable-next-line @next/next/no-img-element */
+          <img
+            key={slide.event.id}
+            src={slide.event.image_url}
+            alt={slide.event.title}
+            className={`animate-[fade_400ms_ease-out] ${
+              fit === "cover"
+                ? "h-full w-full object-cover"
+                : "max-h-full max-w-full object-contain"
+            }`}
+          />
+        )}
         {!isPlaying && (
           <span className="pointer-events-none absolute rounded-full bg-black/60 px-4 py-2 text-xs font-medium uppercase tracking-[0.2em] text-white/80 opacity-0 transition group-hover:opacity-100">
             Paused
@@ -473,32 +505,34 @@ function SlideshowStage({
         </>
       )}
 
-      {/* Title / date / description overlay */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-6 pb-12 pt-16 sm:px-10">
-        <div className="pointer-events-auto mx-auto flex max-w-4xl items-end justify-between gap-4">
-          <div className="min-w-0">
-            {dateLabel && (
-              <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-emerald-300/80">
-                {dateLabel}
-              </div>
-            )}
-            <h2 className="truncate text-2xl font-bold text-white sm:text-3xl">
-              {event.title}
-            </h2>
-            {event.description && (
-              <p className="mt-2 line-clamp-3 max-w-2xl text-sm text-zinc-200/80">
-                {event.description}
-              </p>
-            )}
+      {/* Title / date / description overlay — event slides only */}
+      {event && (
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/85 via-black/50 to-transparent px-6 pb-12 pt-16 sm:px-10">
+          <div className="pointer-events-auto mx-auto flex max-w-4xl items-end justify-between gap-4">
+            <div className="min-w-0">
+              {dateLabel && (
+                <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.2em] text-emerald-300/80">
+                  {dateLabel}
+                </div>
+              )}
+              <h2 className="truncate text-2xl font-bold text-white sm:text-3xl">
+                {event.title}
+              </h2>
+              {event.description && (
+                <p className="mt-2 line-clamp-3 max-w-2xl text-sm text-zinc-200/80">
+                  {event.description}
+                </p>
+              )}
+            </div>
+            <button
+              onClick={onEdit}
+              className="shrink-0 rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-white/70 backdrop-blur transition hover:border-white/20 hover:bg-white/10 hover:text-white"
+            >
+              Edit
+            </button>
           </div>
-          <button
-            onClick={onEdit}
-            className="shrink-0 rounded-md border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] font-medium text-white/70 backdrop-blur transition hover:border-white/20 hover:bg-white/10 hover:text-white"
-          >
-            Edit
-          </button>
         </div>
-      </div>
+      )}
     </div>
   );
 }

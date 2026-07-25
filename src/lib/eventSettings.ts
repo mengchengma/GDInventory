@@ -5,13 +5,19 @@ export type SlideshowSettings = {
   background: string; // CSS color or gradient
   fit: "contain" | "cover";
   showControls: boolean;
+  showCalendar: boolean;
+  calendarPosition: "first" | "last";
+  calendarDurationMs: number;
 };
 
 export const DEFAULT_SETTINGS: SlideshowSettings = {
-  speedMs: 6000,
+  speedMs: 7000,
   background: "#000000",
   fit: "contain",
   showControls: true,
+  showCalendar: true,
+  calendarPosition: "first",
+  calendarDurationMs: 10000,
 };
 
 export const BACKGROUND_PRESETS: Array<{ name: string; value: string }> = [
@@ -35,6 +41,10 @@ export function loadSettings(): SlideshowSettings {
       ...parsed,
       speedMs: clampSpeed(parsed.speedMs ?? DEFAULT_SETTINGS.speedMs),
       fit: parsed.fit === "cover" ? "cover" : "contain",
+      calendarPosition: parsed.calendarPosition === "last" ? "last" : "first",
+      calendarDurationMs: clampSpeed(
+        parsed.calendarDurationMs ?? DEFAULT_SETTINGS.calendarDurationMs
+      ),
     };
   } catch {
     return DEFAULT_SETTINGS;

@@ -147,6 +147,94 @@ export default function SettingsClient() {
           </div>
         </Section>
 
+        <Section
+          title="Calendar slide"
+          hint={
+            settings.showCalendar
+              ? `${Math.round(settings.calendarDurationMs / 1000)}s`
+              : "Off"
+          }
+        >
+          <label className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              checked={settings.showCalendar}
+              onChange={(e) => update("showCalendar", e.target.checked)}
+              className="mt-0.5 h-4 w-4 shrink-0 accent-emerald-500"
+            />
+            <span className="text-xs text-zinc-300">
+              Include a month calendar in the rotation
+              <span className="mt-0.5 block text-[11px] text-zinc-500">
+                Shows the current month with every dated event. Events without a
+                date are skipped.
+              </span>
+            </span>
+          </label>
+
+          {settings.showCalendar && (
+            <div className="mt-4 space-y-4 border-t border-zinc-800 pt-4">
+              <div>
+                <div className="mb-1.5 text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+                  Position
+                </div>
+                <div className="inline-flex rounded-md border border-zinc-800 bg-zinc-950 p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => update("calendarPosition", "first")}
+                    className={`rounded px-3 py-1.5 text-xs font-medium transition ${
+                      settings.calendarPosition === "first"
+                        ? "bg-zinc-800 text-zinc-100"
+                        : "text-zinc-500 hover:text-zinc-300"
+                    }`}
+                  >
+                    First slide
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => update("calendarPosition", "last")}
+                    className={`rounded px-3 py-1.5 text-xs font-medium transition ${
+                      settings.calendarPosition === "last"
+                        ? "bg-zinc-800 text-zinc-100"
+                        : "text-zinc-500 hover:text-zinc-300"
+                    }`}
+                  >
+                    Last slide
+                  </button>
+                </div>
+              </div>
+
+              <div>
+                <div className="mb-1.5 flex items-baseline justify-between">
+                  <span className="text-[11px] font-medium uppercase tracking-wider text-zinc-500">
+                    How long it stays up
+                  </span>
+                  <span className="text-[11px] tabular-nums text-zinc-500">
+                    {Math.round(settings.calendarDurationMs / 1000)}s
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={3}
+                  max={30}
+                  step={1}
+                  value={Math.round(settings.calendarDurationMs / 1000)}
+                  onChange={(e) =>
+                    update(
+                      "calendarDurationMs",
+                      Math.max(3000, Number(e.target.value) * 1000)
+                    )
+                  }
+                  className="w-full accent-emerald-500"
+                />
+                <div className="mt-1 flex justify-between text-[10px] tabular-nums text-zinc-600">
+                  <span>3s</span>
+                  <span>30s</span>
+                </div>
+              </div>
+            </div>
+          )}
+        </Section>
+
         <Section title="Image fit">
           <div className="inline-flex rounded-md border border-zinc-800 bg-zinc-950 p-0.5">
             <button
