@@ -6,7 +6,10 @@ export function middleware(req: NextRequest) {
   const isLoginPage = pathname === "/login";
   const isLoginApi = pathname === "/api/login";
   const isPingApi = pathname === "/api/ping";
-  const isPublic = isLoginPage || isLoginApi || isPingApi;
+  // /api/public/* is the unauthenticated, read-only feed consumed by the
+  // marketing site (gamingdojo.co). Routes under it expose GET only.
+  const isPublicApi = pathname.startsWith("/api/public/");
+  const isPublic = isLoginPage || isLoginApi || isPingApi || isPublicApi;
 
   const token = req.cookies.get("gd_auth")?.value;
   const hasSession = Boolean(token);
