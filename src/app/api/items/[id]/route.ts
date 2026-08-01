@@ -12,6 +12,7 @@ async function guard() {
 type Ctx = { params: Promise<{ id: string }> };
 
 const NON_NEG_INT_FIELDS = ["cases", "loose_units", "min_threshold"] as const;
+const MONEY_FIELDS = ["case_cost", "unit_price"] as const;
 
 export async function PATCH(req: NextRequest, ctx: Ctx) {
   const unauthorized = await guard();
@@ -44,6 +45,10 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
     patch.notes = String(body.notes);
   }
 
+  if (body.sku !== undefined) {
+    patch.sku = String(body.sku).trim();
+  }
+
   if (body.archived !== undefined) {
     patch.archived = Boolean(body.archived);
   }
@@ -69,6 +74,25 @@ export async function PATCH(req: NextRequest, ctx: Ctx) {
         );
       }
       patch[field] = Math.trunc(n);
+    }
+  }
+
+  // Money fields are nullable — an explicit null or "" clears the value.
+  for (const field of MONEY_FIELDS) {
+    if (body[field] !== undefined) {
+      const raw = body[field];
+      if (raw === null || raw === "") {
+        patch[field] = null;
+        continue;
+      }
+      const n = Number(raw);
+      if (!Number.isFinite(n) || n < 0) {
+        return NextResponse.json(
+          { error: `${field} must be a non-negative amount` },
+          { status: 400 }
+        );
+      }
+      patch[field] = Math.round(n * 100) / 100;
     }
   }
 

@@ -10,6 +10,17 @@ import {
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import BulkImportModal from "@/components/BulkImportModal";
+import {
+  LOW_MARGIN_PCT,
+  formatMoney,
+  formatMoneyCompact,
+  formatPct,
+  marginPct,
+  unitCost,
+  unitMargin,
+  valueAtCost,
+  valueAtRetail,
+} from "@/lib/money";
 
 type Item = {
   id: string;
@@ -20,6 +31,9 @@ type Item = {
   loose_units: number;
   min_threshold: number;
   archived: boolean;
+  case_cost: number | null;
+  unit_price: number | null;
+  sku: string;
   notes: string;
   created_at: string;
   updated_at: string;
@@ -97,6 +111,15 @@ export default function InventoryClient() {
   };
   const isStockFilterActive = stockFilters.length > 0;
   const [sortBy, setSortBy] = useState<SortOption>("recent");
+  const [showMoney, setShowMoney] = useState(false);
+
+  useEffect(() => {
+    setShowMoney(localStorage.getItem("gd_show_money") === "1");
+  }, []);
+
+  useEffect(() => {
+    localStorage.setItem("gd_show_money", showMoney ? "1" : "0");
+  }, [showMoney]);
 
   // Hydrate sort preference from localStorage
   useEffect(() => {
@@ -145,6 +168,9 @@ export default function InventoryClient() {
     cases: number;
     loose_units: number;
     min_threshold: number;
+    case_cost: number | null;
+    unit_price: number | null;
+    sku: string;
     notes: string;
   }) {
     const res = await fetch("/api/items", {
@@ -265,7 +291,8 @@ export default function InventoryClient() {
       return (
         it.name.toLowerCase().includes(q) ||
         it.notes.toLowerCase().includes(q) ||
-        cat.toLowerCase().includes(q)
+        cat.toLowerCase().includes(q) ||
+        (it.sku ?? "").toLowerCase().includes(q)
       );
     });
   }, [visibleItems, query, activeCategory, stockFilters]);
@@ -298,14 +325,32 @@ export default function InventoryClient() {
     let units = 0;
     let low = 0;
     let outOfStock = 0;
+    let cost = 0;
+    let retail = 0;
+    let pricedCount = 0;
     for (const it of activeItems) {
       cases += it.cases;
       units += totalUnits(it);
       const s = stockState(it);
       if (s === "out") outOfStock += 1;
       else if (s === "low") low += 1;
+
+      const c = valueAtCost(it);
+      const r = valueAtRetail(it);
+      if (c !== null) cost += c;
+      if (r !== null) retail += r;
+      if (c !== null || r !== null) pricedCount += 1;
     }
-    return { cases, units, low, outOfStock };
+    return {
+      cases,
+      units,
+      low,
+      outOfStock,
+      cost,
+      retail,
+      profit: retail - cost,
+      pricedCount,
+    };
   }, [activeItems]);
 
   const allCategoryNames = useMemo(() => {
@@ -323,6 +368,7 @@ export default function InventoryClient() {
         activeFilters={stockFilters}
         onToggleLow={() => toggleStockFilter("low")}
         onToggleOut={() => toggleStockFilter("out")}
+        showMoney={showMoney}
         onLogout={logout}
       />
 
@@ -422,7 +468,32 @@ export default function InventoryClient() {
           )}
         </button>
 
-        <SortPicker value={sortBy} onChange={setSortBy} />
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => setShowMoney((v) => !v)}
+            className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-1 font-medium transition ${
+              showMoney
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                : "border-zinc-800 bg-zinc-900/40 text-zinc-400 hover:border-zinc-700 hover:text-zinc-200"
+            }`}
+            title="Show cost, price and margin"
+          >
+            <svg
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              className="h-3 w-3"
+              aria-hidden
+            >
+              <path d="M12 1v22M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6" />
+            </svg>
+            Pricing
+          </button>
+          <SortPicker value={sortBy} onChange={setSortBy} />
+        </div>
       </div>
 
       {showAddForm && (
@@ -469,6 +540,7 @@ export default function InventoryClient() {
               items={flatItems}
               onPatch={patchItem}
               onEdit={(it) => setEditing(it)}
+              showMoney={showMoney}
             />
           )
         ) : grouped.length === 0 ? (
@@ -491,6 +563,7 @@ export default function InventoryClient() {
                 onPatch={patchItem}
                 onEdit={(it) => setEditing(it)}
                 onRenameCategory={renameCategory}
+                showMoney={showMoney}
               />
             ))}
           </div>
@@ -545,12 +618,23 @@ function TopBar({
   activeFilters,
   onToggleLow,
   onToggleOut,
+  showMoney,
   onLogout,
 }: {
-  stats: { cases: number; units: number; low: number; outOfStock: number };
+  stats: {
+    cases: number;
+    units: number;
+    low: number;
+    outOfStock: number;
+    cost: number;
+    retail: number;
+    profit: number;
+    pricedCount: number;
+  };
   activeFilters: Array<"low" | "out">;
   onToggleLow: () => void;
   onToggleOut: () => void;
+  showMoney: boolean;
   onLogout: () => void;
 }) {
   return (
@@ -629,6 +713,24 @@ function TopBar({
           active={activeFilters.includes("out")}
         />
       </div>
+
+      {showMoney && (
+        <div className="mt-2 grid grid-cols-3 gap-2 sm:mt-3 sm:gap-3">
+          <StatBox
+            label="Stock value (cost)"
+            display={formatMoneyCompact(stats.cost)}
+          />
+          <StatBox
+            label="Retail value"
+            display={formatMoneyCompact(stats.retail)}
+          />
+          <StatBox
+            label="Potential profit"
+            display={formatMoneyCompact(stats.profit)}
+            tone="emerald"
+          />
+        </div>
+      )}
     </header>
   );
 }
@@ -636,12 +738,15 @@ function TopBar({
 function StatBox({
   label,
   value,
+  display,
   tone = "default",
   onClick,
   active = false,
 }: {
   label: string;
-  value: number;
+  value?: number;
+  /** Pre-formatted text (e.g. currency). Falls back to `value`. */
+  display?: string;
   tone?: "default" | "emerald" | "amber" | "danger";
   onClick?: () => void;
   active?: boolean;
@@ -651,12 +756,12 @@ function StatBox({
     toneClasses = "border-emerald-500/30 bg-emerald-500/5 text-emerald-300";
   } else if (tone === "amber") {
     toneClasses =
-      value > 0
+      (value ?? 0) > 0
         ? "border-amber-500/30 bg-amber-500/5 text-amber-300"
         : "border-zinc-800 bg-zinc-900/60 text-zinc-300";
   } else if (tone === "danger") {
     toneClasses =
-      value > 0
+      (value ?? 0) > 0
         ? "border-red-500/30 bg-red-500/5 text-red-300"
         : "border-zinc-800 bg-zinc-900/60 text-zinc-300";
   }
@@ -683,7 +788,7 @@ function StatBox({
         {label}
       </div>
       <div className="mt-0.5 text-xl font-bold tabular-nums sm:text-2xl">
-        {value}
+        {display ?? value}
       </div>
     </Wrapper>
   );
@@ -772,6 +877,9 @@ function AddItemForm({
     cases: number;
     loose_units: number;
     min_threshold: number;
+    case_cost: number | null;
+    unit_price: number | null;
+    sku: string;
     notes: string;
   }) => Promise<void>;
   onCancel: () => void;
@@ -782,6 +890,9 @@ function AddItemForm({
   const [cases, setCases] = useState("0");
   const [loose, setLoose] = useState("0");
   const [threshold, setThreshold] = useState("0");
+  const [caseCost, setCaseCost] = useState("");
+  const [unitPrice, setUnitPrice] = useState("");
+  const [sku, setSku] = useState("");
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -802,6 +913,9 @@ function AddItemForm({
         cases: Math.max(0, Number(cases) || 0),
         loose_units: Math.max(0, Number(loose) || 0),
         min_threshold: Math.max(0, Number(threshold) || 0),
+        case_cost: caseCost.trim() === "" ? null : Number(caseCost),
+        unit_price: unitPrice.trim() === "" ? null : Number(unitPrice),
+        sku: sku.trim(),
         notes,
       });
       setName("");
@@ -810,6 +924,9 @@ function AddItemForm({
       setCases("0");
       setLoose("0");
       setThreshold("0");
+      setCaseCost("");
+      setUnitPrice("");
+      setSku("");
       setNotes("");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to add");
@@ -905,6 +1022,31 @@ function AddItemForm({
         </Field>
       </div>
 
+      <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <Field label="Case price" hint="you pay">
+          <MoneyInput value={caseCost} onChange={setCaseCost} />
+        </Field>
+        <Field label="Sale price" hint="per unit">
+          <MoneyInput value={unitPrice} onChange={setUnitPrice} />
+        </Field>
+        <Field label="SKU">
+          <input
+            type="text"
+            inputMode="numeric"
+            value={sku}
+            onChange={(e) => setSku(e.target.value)}
+            placeholder="Optional"
+            className={`${fieldInput} tabular-nums`}
+          />
+        </Field>
+      </div>
+
+      <MarginHint
+        caseCost={caseCost}
+        unitPrice={unitPrice}
+        unitsPerCase={unitsPerCase}
+      />
+
       <div className="mt-3">
         <Field label="Notes">
           <textarea
@@ -938,6 +1080,81 @@ function AddItemForm({
 
 const fieldInput =
   "w-full rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/20";
+
+function MoneyInput({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div className="relative">
+      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-zinc-500">
+        $
+      </span>
+      <input
+        type="number"
+        min={0}
+        step="0.01"
+        inputMode="decimal"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        placeholder="—"
+        className={`${fieldInput} pl-7 tabular-nums`}
+      />
+    </div>
+  );
+}
+
+/** Live "→ $0.77/unit · $1.23 margin · 61%" readout under the cost fields. */
+function MarginHint({
+  caseCost,
+  unitPrice,
+  unitsPerCase,
+}: {
+  caseCost: string;
+  unitPrice: string;
+  unitsPerCase: string;
+}) {
+  const per = Math.max(1, Number(unitsPerCase) || 1);
+  const cost = caseCost.trim() === "" ? null : Number(caseCost);
+  const price = unitPrice.trim() === "" ? null : Number(unitPrice);
+
+  if (cost === null && price === null) return null;
+  if (cost !== null && !Number.isFinite(cost)) return null;
+  if (price !== null && !Number.isFinite(price)) return null;
+
+  const perUnit = cost === null ? null : cost / per;
+  const margin = perUnit === null || price === null ? null : price - perUnit;
+  const pct =
+    margin === null || price === null || price === 0
+      ? null
+      : (margin / price) * 100;
+
+  const tone =
+    margin === null
+      ? "text-zinc-500"
+      : margin < 0
+        ? "text-red-300"
+        : pct !== null && pct < LOW_MARGIN_PCT
+          ? "text-amber-300"
+          : "text-emerald-300";
+
+  return (
+    <div className={`mt-2 text-[11px] tabular-nums ${tone}`}>
+      {perUnit !== null && <>{formatMoney(perUnit)} unit price</>}
+      {margin !== null && (
+        <>
+          {" · "}
+          {formatMoney(margin)} profit
+          {pct !== null && <> · {formatPct(pct)}</>}
+          {margin < 0 && " — selling below cost"}
+        </>
+      )}
+    </div>
+  );
+}
 
 function Field({
   label,
@@ -1003,20 +1220,16 @@ function FlatItemList({
   items,
   onPatch,
   onEdit,
+  showMoney,
 }: {
   items: Item[];
   onPatch: (id: string, patch: Partial<Item>) => Promise<Item>;
   onEdit: (item: Item) => void;
+  showMoney: boolean;
 }) {
   return (
     <div>
-      <div className="hidden grid-cols-[1fr_140px_140px_90px_36px] gap-3 px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-zinc-500 sm:grid">
-        <div>Item</div>
-        <div className="text-center">Cases</div>
-        <div className="text-center">Loose units</div>
-        <div className="text-right">Total</div>
-        <div />
-      </div>
+      <ColumnHeader showMoney={showMoney} />
       <div className="divide-y divide-zinc-900 rounded-xl border border-zinc-800/70 bg-zinc-900/30">
         {items.map((it) => (
           <ItemRow
@@ -1025,9 +1238,38 @@ function FlatItemList({
             onPatch={onPatch}
             onEdit={onEdit}
             showCategory
+            showMoney={showMoney}
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Grid template shared by the column header and every row, so they stay aligned. */
+const ROW_GRID = "sm:grid-cols-[1fr_140px_140px_90px_36px]";
+const ROW_GRID_MONEY =
+  "sm:grid-cols-[1fr_120px_120px_80px_78px_78px_92px_36px]";
+
+function ColumnHeader({ showMoney }: { showMoney: boolean }) {
+  return (
+    <div
+      className={`hidden gap-3 px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-zinc-500 sm:grid ${
+        showMoney ? ROW_GRID_MONEY : ROW_GRID
+      }`}
+    >
+      <div>Item</div>
+      <div className="text-center">Cases</div>
+      <div className="text-center">Loose units</div>
+      <div className="text-right">Total</div>
+      {showMoney && (
+        <>
+          <div className="text-right">Unit price</div>
+          <div className="text-right">Sale price</div>
+          <div className="text-right">Profit margin</div>
+        </>
+      )}
+      <div />
     </div>
   );
 }
@@ -1079,12 +1321,14 @@ function CategorySection({
   onPatch,
   onEdit,
   onRenameCategory,
+  showMoney,
 }: {
   category: string;
   items: Item[];
   onPatch: (id: string, patch: Partial<Item>) => Promise<Item>;
   onEdit: (item: Item) => void;
   onRenameCategory: (from: string, to: string) => Promise<void>;
+  showMoney: boolean;
 }) {
   const [renaming, setRenaming] = useState(false);
   const [draft, setDraft] = useState(category);
@@ -1154,17 +1398,17 @@ function CategorySection({
         </span>
       </div>
 
-      <div className="hidden grid-cols-[1fr_140px_140px_90px_36px] gap-3 px-3 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wider text-zinc-500 sm:grid">
-        <div>Item</div>
-        <div className="text-center">Cases</div>
-        <div className="text-center">Loose units</div>
-        <div className="text-right">Total</div>
-        <div />
-      </div>
+      <ColumnHeader showMoney={showMoney} />
 
       <div className="divide-y divide-zinc-900 rounded-xl border border-zinc-800/70 bg-zinc-900/30">
         {items.map((it) => (
-          <ItemRow key={it.id} item={it} onPatch={onPatch} onEdit={onEdit} />
+          <ItemRow
+            key={it.id}
+            item={it}
+            onPatch={onPatch}
+            onEdit={onEdit}
+            showMoney={showMoney}
+          />
         ))}
       </div>
     </section>
@@ -1176,14 +1420,20 @@ function ItemRow({
   onPatch,
   onEdit,
   showCategory = false,
+  showMoney = false,
 }: {
   item: Item;
   onPatch: (id: string, patch: Partial<Item>) => Promise<Item>;
   onEdit: (item: Item) => void;
   showCategory?: boolean;
+  showMoney?: boolean;
 }) {
   const t = totalUnits(item);
   const state = stockState(item);
+  const cost = unitCost(item);
+  const margin = unitMargin(item);
+  const pct = marginPct(item);
+  const isThinMargin = pct !== null && pct < LOW_MARGIN_PCT;
 
   async function setField(field: "cases" | "loose_units", value: number) {
     const clean = Math.max(0, Math.trunc(value));
@@ -1204,9 +1454,9 @@ function ItemRow({
 
   return (
     <div
-      className={`grid grid-cols-1 items-center gap-3 px-3 py-3 sm:grid-cols-[1fr_140px_140px_90px_36px] ${
-        item.archived ? "opacity-60" : ""
-      }`}
+      className={`grid grid-cols-1 items-center gap-3 px-3 py-3 ${
+        showMoney ? ROW_GRID_MONEY : ROW_GRID
+      } ${item.archived ? "opacity-60" : ""}`}
     >
       <div className="min-w-0">
         <div className="flex items-center gap-2">
@@ -1219,6 +1469,11 @@ function ItemRow({
           {state === "low" && (
             <span className="shrink-0 rounded-sm bg-amber-500/15 px-1.5 py-px text-[9px] font-bold uppercase tracking-wider text-amber-300 ring-1 ring-amber-500/30">
               Low
+            </span>
+          )}
+          {showMoney && isThinMargin && (
+            <span className="shrink-0 rounded-sm bg-amber-500/15 px-1.5 py-px text-[9px] font-bold uppercase tracking-wider text-amber-300 ring-1 ring-amber-500/30">
+              Thin
             </span>
           )}
           {item.archived && (
@@ -1237,6 +1492,12 @@ function ItemRow({
             </>
           )}
           <span>{item.units_per_case} units/case</span>
+          {showMoney && item.sku && (
+            <>
+              <span className="text-zinc-700">•</span>
+              <span className="tabular-nums">{item.sku}</span>
+            </>
+          )}
           {item.min_threshold > 0 && (
             <>
               <span className="text-zinc-700">•</span>
@@ -1281,6 +1542,27 @@ function ItemRow({
         {t} <span className="text-[10px] font-normal text-zinc-500">units</span>
       </div>
 
+      {showMoney && (
+        <>
+          <MoneyCell label="Unit price" value={formatMoney(cost)} muted />
+          <MoneyCell label="Sale price" value={formatMoney(item.unit_price)} />
+          <MoneyCell
+            label="Profit margin"
+            value={formatMoney(margin)}
+            sub={pct === null ? undefined : formatPct(pct)}
+            tone={
+              margin === null
+                ? "muted"
+                : margin < 0
+                  ? "danger"
+                  : isThinMargin
+                    ? "warn"
+                    : "good"
+            }
+          />
+        </>
+      )}
+
       <button
         onClick={() => onEdit(item)}
         className="hidden h-8 w-8 items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-800 hover:text-zinc-200 sm:flex"
@@ -1300,6 +1582,47 @@ function ItemRow({
           <circle cx="12" cy="19" r="1" />
         </svg>
       </button>
+    </div>
+  );
+}
+
+function MoneyCell({
+  label,
+  value,
+  sub,
+  tone = "default",
+  muted = false,
+}: {
+  label: string;
+  value: string;
+  sub?: string;
+  tone?: "default" | "good" | "warn" | "danger" | "muted";
+  muted?: boolean;
+}) {
+  const color =
+    tone === "good"
+      ? "text-emerald-300"
+      : tone === "warn"
+        ? "text-amber-300"
+        : tone === "danger"
+          ? "text-red-400"
+          : muted || tone === "muted"
+            ? "text-zinc-400"
+            : "text-zinc-200";
+
+  return (
+    <div className="flex items-baseline gap-2 sm:block sm:text-right">
+      <span className="text-[10px] uppercase tracking-wider text-zinc-500 sm:hidden">
+        {label}
+      </span>
+      <span className={`text-sm font-medium tabular-nums ${color}`}>
+        {value}
+      </span>
+      {sub && (
+        <span className="text-[10px] tabular-nums text-zinc-500 sm:ml-1">
+          {sub}
+        </span>
+      )}
     </div>
   );
 }
@@ -1406,6 +1729,13 @@ function EditItemModal({
   const [category, setCategory] = useState(item.category);
   const [unitsPerCase, setUnitsPerCase] = useState(String(item.units_per_case));
   const [threshold, setThreshold] = useState(String(item.min_threshold));
+  const [caseCost, setCaseCost] = useState(
+    item.case_cost === null ? "" : String(item.case_cost)
+  );
+  const [unitPrice, setUnitPrice] = useState(
+    item.unit_price === null ? "" : String(item.unit_price)
+  );
+  const [sku, setSku] = useState(item.sku ?? "");
   const [notes, setNotes] = useState(item.notes);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -1425,6 +1755,9 @@ function EditItemModal({
         category: category.trim(),
         units_per_case: Math.max(1, Number(unitsPerCase) || 1),
         min_threshold: Math.max(0, Number(threshold) || 0),
+        case_cost: caseCost.trim() === "" ? null : Number(caseCost),
+        unit_price: unitPrice.trim() === "" ? null : Number(unitPrice),
+        sku: sku.trim(),
         notes,
       });
     } catch (e) {
@@ -1513,6 +1846,31 @@ function EditItemModal({
                 className={`${fieldInput} tabular-nums`}
               />
             </Field>
+          </div>
+          <div>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <Field label="Case price" hint="you pay">
+                <MoneyInput value={caseCost} onChange={setCaseCost} />
+              </Field>
+              <Field label="Sale price" hint="per unit">
+                <MoneyInput value={unitPrice} onChange={setUnitPrice} />
+              </Field>
+              <Field label="SKU">
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={sku}
+                  onChange={(e) => setSku(e.target.value)}
+                  placeholder="Optional"
+                  className={`${fieldInput} tabular-nums`}
+                />
+              </Field>
+            </div>
+            <MarginHint
+              caseCost={caseCost}
+              unitPrice={unitPrice}
+              unitsPerCase={unitsPerCase}
+            />
           </div>
           <Field label="Notes">
             <textarea

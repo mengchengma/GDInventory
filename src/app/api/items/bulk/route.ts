@@ -9,6 +9,9 @@ type InputRow = {
   cases?: unknown;
   loose_units?: unknown;
   min_threshold?: unknown;
+  case_cost?: unknown;
+  unit_price?: unknown;
+  sku?: unknown;
   notes?: unknown;
 };
 
@@ -16,6 +19,13 @@ function toNonNegInt(v: unknown, fallback: number): number {
   const n = Number(v);
   if (!Number.isFinite(n)) return fallback;
   return Math.max(0, Math.trunc(n));
+}
+
+function toMoneyOrNull(v: unknown): number | null {
+  if (v === null || v === undefined || v === "") return null;
+  const n = Number(v);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
 }
 
 export async function POST(req: NextRequest) {
@@ -58,6 +68,9 @@ export async function POST(req: NextRequest) {
       cases: toNonNegInt(r.cases, 0),
       loose_units: toNonNegInt(r.loose_units, 0),
       min_threshold: toNonNegInt(r.min_threshold, 0),
+      case_cost: toMoneyOrNull(r.case_cost),
+      unit_price: toMoneyOrNull(r.unit_price),
+      sku: String(r.sku ?? "").trim(),
       notes: String(r.notes ?? ""),
     });
   }

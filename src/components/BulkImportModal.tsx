@@ -9,22 +9,115 @@ export type BulkRow = {
   cases: number;
   loose_units: number;
   min_threshold: number;
+  case_cost: number | null;
+  unit_price: number | null;
+  sku: string;
   notes: string;
   _lineNumber: number;
   _error?: string;
 };
 
-const HEADER_KEYWORDS = [
+// Canonical fields, and the header spellings we accept for each. Lets a
+// distributor order sheet ("Item Name", "Case Price", "Items Per Case", …) be
+// pasted straight in, whatever order its columns happen to be in.
+const FIELD_ALIASES: Record<string, string[]> = {
+  name: ["name", "item name", "item", "product", "product name", "description"],
+  sku: ["sku", "upc", "barcode", "item code", "code"],
+  category: ["category", "brand", "type", "group"],
+  units_per_case: [
+    "units per case",
+    "items per case",
+    "units/case",
+    "unitspercase",
+    "pack size",
+    "pack",
+    "count",
+  ],
+  cases: ["cases", "case qty", "qty cases", "full cases", "on hand cases"],
+  loose_units: ["loose units", "loose", "singles", "open units", "each"],
+  min_threshold: ["low threshold", "low at", "threshold", "min", "par"],
+  case_cost: ["case price", "case cost", "cost per case", "case", "cost"],
+  unit_price: [
+    "sale price",
+    "retail price",
+    "selling price",
+    "price",
+    "sell price",
+  ],
+  notes: ["notes", "note", "comment", "comments"],
+};
+
+// Columns we knowingly ignore — they're derived, so importing them would be
+// stale the moment a price changes.
+const DERIVED_HEADERS = [
+  "unit price",
+  "unit cost",
+  "cost per unit",
+  "profit margin",
+  "margin",
+  "profit",
+  "total",
+  "total value",
+  "order value",
+  "extended",
+];
+
+const POSITIONAL_ORDER = [
   "name",
-  "item",
-  "product",
   "category",
-  "units",
+  "units_per_case",
   "cases",
-  "loose",
-  "threshold",
+  "loose_units",
+  "min_threshold",
+  "case_cost",
+  "unit_price",
   "notes",
 ];
+
+function normaliseHeader(s: string): string {
+  return s
+    .toLowerCase()
+    .replace(/[$#()]/g, "")
+    .replace(/[_\-/]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+/**
+ * Try to read a row as a header. Returns a map of column index → field name,
+ * or null if this doesn't look like a header row.
+ */
+function detectHeaderMap(cells: string[]): Map<number, string> | null {
+  const map = new Map<number, string>();
+  let matched = 0;
+  let looksLikeHeader = 0;
+
+  cells.forEach((raw, i) => {
+    const h = normaliseHeader(raw);
+    if (!h) return;
+
+    if (DERIVED_HEADERS.includes(h)) {
+      looksLikeHeader++;
+      return; // recognised, but deliberately not imported
+    }
+
+    for (const [field, aliases] of Object.entries(FIELD_ALIASES)) {
+      if (aliases.includes(h)) {
+        // First column wins, so "Case Price" doesn't get clobbered by "Price".
+        if (![...map.values()].includes(field)) {
+          map.set(i, field);
+          matched++;
+          looksLikeHeader++;
+        }
+        return;
+      }
+    }
+  });
+
+  // Need a name column and at least two recognised headers to be confident.
+  if (!([...map.values()].includes("name")) || looksLikeHeader < 2) return null;
+  return matched > 0 ? map : null;
+}
 
 function parseLine(line: string): string[] {
   // If tabs are present, split by tab (Excel paste). Else CSV with quote handling.
@@ -60,14 +153,6 @@ function parseLine(line: string): string[] {
   return cells;
 }
 
-function isHeaderRow(cells: string[]): boolean {
-  const lowered = cells.map((c) => c.toLowerCase());
-  let hits = 0;
-  for (const c of lowered) {
-    if (HEADER_KEYWORDS.some((k) => c.includes(k))) hits++;
-  }
-  return hits >= 2;
-}
 
 function toIntOr(value: string, fallback: number): { n: number; ok: boolean } {
   if (value.trim() === "") return { n: fallback, ok: true };
@@ -76,10 +161,26 @@ function toIntOr(value: string, fallback: number): { n: number; ok: boolean } {
   return { n: Math.max(0, Math.trunc(n)), ok: true };
 }
 
-export function parseBulkInput(text: string): BulkRow[] {
+/** Money is optional — blank means "not priced", not zero. Tolerates a leading $. */
+function toMoneyOr(value: string): { n: number | null; ok: boolean } {
+  const cleaned = value.trim().replace(/^\$/, "");
+  if (cleaned === "") return { n: null, ok: true };
+  const n = Number(cleaned);
+  if (!Number.isFinite(n) || n < 0) return { n: null, ok: false };
+  return { n: Math.round(n * 100) / 100, ok: true };
+}
+
+export type ParseResult = {
+  rows: BulkRow[];
+  /** Which field each column maps to, when a header row was recognised. */
+  headerMap: Map<number, string> | null;
+};
+
+export function parseBulkInput(text: string): ParseResult {
   const out: BulkRow[] = [];
   const lines = text.split(/\r?\n/);
-  let skippedHeader = false;
+  let headerMap: Map<number, string> | null = null;
+  let sawHeader = false;
 
   for (let i = 0; i < lines.length; i++) {
     const raw = lines[i];
@@ -87,50 +188,62 @@ export function parseBulkInput(text: string): BulkRow[] {
     if (!trimmed || trimmed.startsWith("#")) continue;
     const cells = parseLine(raw);
 
-    if (!skippedHeader && isHeaderRow(cells)) {
-      skippedHeader = true;
-      continue;
+    // The first recognisable header row defines the column mapping.
+    if (!sawHeader) {
+      const detected = detectHeaderMap(cells);
+      if (detected) {
+        headerMap = detected;
+        sawHeader = true;
+        continue;
+      }
+      sawHeader = true; // no header — fall back to fixed column order
     }
 
-    const [
-      name = "",
-      category = "",
-      unitsPerCaseRaw = "",
-      casesRaw = "",
-      looseRaw = "",
-      thresholdRaw = "",
-      notes = "",
-    ] = cells;
+    const get = (field: string): string => {
+      if (headerMap) {
+        for (const [idx, f] of headerMap) {
+          if (f === field) return cells[idx] ?? "";
+        }
+        return "";
+      }
+      const idx = POSITIONAL_ORDER.indexOf(field);
+      return idx === -1 ? "" : (cells[idx] ?? "");
+    };
 
+    const name = get("name");
     let error: string | undefined;
+    if (!name.trim()) error = "missing name";
 
-    if (!name.trim()) {
-      error = "missing name";
-    }
-
-    const upc = toIntOr(unitsPerCaseRaw, 1);
-    const cs = toIntOr(casesRaw, 0);
-    const ls = toIntOr(looseRaw, 0);
-    const th = toIntOr(thresholdRaw, 0);
+    const upc = toIntOr(get("units_per_case"), 1);
+    const cs = toIntOr(get("cases"), 0);
+    const ls = toIntOr(get("loose_units"), 0);
+    const th = toIntOr(get("min_threshold"), 0);
+    const cc = toMoneyOr(get("case_cost"));
+    const up = toMoneyOr(get("unit_price"));
     if (!upc.ok) error = error ?? "bad units/case";
     if (!cs.ok) error = error ?? "bad cases";
     if (!ls.ok) error = error ?? "bad loose units";
     if (!th.ok) error = error ?? "bad threshold";
+    if (!cc.ok) error = error ?? "bad case price";
+    if (!up.ok) error = error ?? "bad sale price";
 
     out.push({
       _lineNumber: i + 1,
       _error: error,
       name: name.trim(),
-      category: category.trim(),
+      category: get("category").trim(),
       units_per_case: Math.max(1, upc.n),
       cases: cs.n,
       loose_units: ls.n,
       min_threshold: th.n,
-      notes: notes.trim(),
+      case_cost: cc.n,
+      unit_price: up.n,
+      sku: get("sku").trim(),
+      notes: get("notes").trim(),
     });
   }
 
-  return out;
+  return { rows: out, headerMap };
 }
 
 export default function BulkImportModal({
@@ -144,9 +257,13 @@ export default function BulkImportModal({
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  const rows = useMemo(() => parseBulkInput(text), [text]);
+  const { rows, headerMap } = useMemo(() => parseBulkInput(text), [text]);
   const validRows = useMemo(() => rows.filter((r) => !r._error), [rows]);
   const errorCount = rows.length - validRows.length;
+  const mappedFields = useMemo(
+    () => (headerMap ? Array.from(new Set(headerMap.values())) : []),
+    [headerMap]
+  );
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -218,32 +335,67 @@ export default function BulkImportModal({
         <div className="flex-1 overflow-y-auto p-4 sm:p-5">
           <div className="mb-3 rounded-lg border border-zinc-800 bg-zinc-950/60 p-3 text-xs text-zinc-400">
             <div className="mb-1.5 font-medium text-zinc-300">
-              Format — one item per line:
+              Paste a spreadsheet — including the header row
             </div>
-            <code className="block text-[11px] text-emerald-300">
-              name, category, units_per_case, cases, loose_units, low_threshold, notes
-            </code>
-            <div className="mt-2 space-y-0.5 text-[11px]">
+            <div className="space-y-0.5 text-[11px]">
               <div>
-                • Only <span className="text-zinc-300">name</span> is required;
-                missing columns default to 0 (or 1 for units/case).
+                • Copy straight out of Google Sheets or Excel. Columns are
+                matched by their header name, in any order.
               </div>
               <div>
-                • Tab-separated also works — paste directly from Excel / Google
-                Sheets.
+                • Understood headers:{" "}
+                <span className="text-emerald-300">
+                  Item Name, SKU, Category, Case Price, Items Per Case, Sale
+                  Price, Cases, Loose Units, Low Threshold, Notes
+                </span>
               </div>
               <div>
-                • Header row is auto-detected and skipped (if it contains words
-                like &quot;name&quot;, &quot;category&quot;).
+                • Derived columns (Unit Price, Profit Margin, Total) are ignored
+                — the app recalculates those.
               </div>
-              <div>• Lines starting with # are treated as comments.</div>
+              <div>
+                • No header row? Falls back to this fixed order:{" "}
+                <span className="text-zinc-300">
+                  name, category, units_per_case, cases, loose_units,
+                  low_threshold, case_price, sale_price, notes
+                </span>
+              </div>
+              <div>
+                • Only <span className="text-zinc-300">name</span> is required.
+                Lines starting with # are comments.
+              </div>
             </div>
           </div>
+
+          {headerMap && (
+            <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/5 px-3 py-2 text-[11px] text-emerald-200">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="h-3 w-3"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+              <span className="font-medium">Header detected — mapping:</span>
+              {mappedFields.map((f) => (
+                <span
+                  key={f}
+                  className="rounded-sm bg-emerald-500/15 px-1.5 py-px font-mono text-[10px]"
+                >
+                  {f}
+                </span>
+              ))}
+            </div>
+          )}
 
           <textarea
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder={`Coca-Cola, CAN SODA, 24, 5, 2\nSprite, CAN SODA, 24, 3, 0\nSnapple Peach, SNAPPLE, 12, 2, 1`}
+            placeholder={`Item Name\tSKU\tCase Price\tItems Per Case\tSale Price\nBloom (Crisp Apple)\t842595138214\t$28.00\t12\t$2.99\nC4 (Godzilla)\t842595139099\t$28.00\t12\t$3.50`}
             rows={8}
             spellCheck={false}
             className="w-full resize-y rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 font-mono text-xs text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-emerald-500/60 focus:ring-2 focus:ring-emerald-500/20"
@@ -271,6 +423,7 @@ export default function BulkImportModal({
                   <thead className="bg-zinc-950/60 text-[10px] uppercase tracking-wider text-zinc-500">
                     <tr>
                       <th className="px-2 py-2 text-left font-medium">Name</th>
+                      <th className="px-2 py-2 text-left font-medium">SKU</th>
                       <th className="px-2 py-2 text-left font-medium">
                         Category
                       </th>
@@ -282,6 +435,12 @@ export default function BulkImportModal({
                         Loose
                       </th>
                       <th className="px-2 py-2 text-right font-medium">Low</th>
+                      <th className="px-2 py-2 text-right font-medium">
+                        $/case
+                      </th>
+                      <th className="px-2 py-2 text-right font-medium">
+                        $/unit
+                      </th>
                       <th className="px-2 py-2 text-left font-medium">Note</th>
                     </tr>
                   </thead>
@@ -305,6 +464,9 @@ export default function BulkImportModal({
                             </span>
                           )}
                         </td>
+                        <td className="px-2 py-1.5 tabular-nums text-zinc-500">
+                          {r.sku || <span className="text-zinc-700">—</span>}
+                        </td>
                         <td className="px-2 py-1.5 text-zinc-400">
                           {r.category || (
                             <span className="text-zinc-600">—</span>
@@ -322,6 +484,16 @@ export default function BulkImportModal({
                         <td className="px-2 py-1.5 text-right tabular-nums text-zinc-500">
                           {r.min_threshold || ""}
                         </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-zinc-400">
+                          {r.case_cost === null
+                            ? ""
+                            : r.case_cost.toFixed(2)}
+                        </td>
+                        <td className="px-2 py-1.5 text-right tabular-nums text-zinc-400">
+                          {r.unit_price === null
+                            ? ""
+                            : r.unit_price.toFixed(2)}
+                        </td>
                         <td className="px-2 py-1.5 text-zinc-500">
                           {r.notes && (
                             <span className="line-clamp-1 italic">
@@ -334,7 +506,7 @@ export default function BulkImportModal({
                     {rows.length > 50 && (
                       <tr>
                         <td
-                          colSpan={7}
+                          colSpan={10}
                           className="px-2 py-2 text-center text-[11px] text-zinc-500"
                         >
                           + {rows.length - 50} more row

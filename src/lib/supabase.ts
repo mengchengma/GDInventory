@@ -30,6 +30,9 @@ export type Item = {
   loose_units: number;
   min_threshold: number;
   archived: boolean;
+  case_cost: number | null;
+  unit_price: number | null;
+  sku: string;
   notes: string;
   created_at: string;
   updated_at: string;

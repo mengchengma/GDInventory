@@ -15,6 +15,14 @@ function toNonNegativeInt(value: unknown, fallback: number): number {
   return Math.max(0, Math.trunc(n));
 }
 
+// Money fields are optional: null/"" clears them, anything unparseable is dropped.
+function toMoneyOrNull(value: unknown): number | null {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Math.round(n * 100) / 100;
+}
+
 export async function GET(req: NextRequest) {
   const unauthorized = await guard();
   if (unauthorized) return unauthorized;
@@ -53,6 +61,9 @@ export async function POST(req: NextRequest) {
     cases?: number;
     loose_units?: number;
     min_threshold?: number;
+    case_cost?: number | null;
+    unit_price?: number | null;
+    sku?: string;
     notes?: string;
   };
   try {
@@ -73,6 +84,9 @@ export async function POST(req: NextRequest) {
     cases: toNonNegativeInt(body.cases, 0),
     loose_units: toNonNegativeInt(body.loose_units, 0),
     min_threshold: toNonNegativeInt(body.min_threshold, 0),
+    case_cost: toMoneyOrNull(body.case_cost),
+    unit_price: toMoneyOrNull(body.unit_price),
+    sku: String(body.sku ?? "").trim(),
     notes: String(body.notes ?? ""),
   };
 

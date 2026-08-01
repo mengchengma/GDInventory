@@ -16,6 +16,15 @@ alter table items add column if not exists loose_units integer not null default 
 alter table items add column if not exists min_threshold integer not null default 0;
 alter table items add column if not exists archived boolean not null default false;
 
+-- Pricing (both nullable — items without them simply show no financials).
+-- case_cost  = what you pay your supplier for one case
+-- unit_price = what a customer pays for one unit
+alter table items add column if not exists case_cost numeric(10,2);
+alter table items add column if not exists unit_price numeric(10,2);
+
+-- Distributor SKU / UPC, as printed on the order sheet.
+alter table items add column if not exists sku text not null default '';
+
 -- Migrate legacy `quantity` column into `loose_units`, then drop it
 do $$
 begin
