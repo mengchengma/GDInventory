@@ -109,8 +109,12 @@ export default function MembersClient() {
   // Opt this route out of the app-wide fixed-attachment background, which
   // smears under the iframe. See body.kiosk-mode in globals.css.
   useEffect(() => {
+    document.documentElement.classList.add("kiosk-mode");
     document.body.classList.add("kiosk-mode");
-    return () => document.body.classList.remove("kiosk-mode");
+    return () => {
+      document.documentElement.classList.remove("kiosk-mode");
+      document.body.classList.remove("kiosk-mode");
+    };
   }, []);
 
   // Trap the hardware back button while locked. Re-pushing on every popstate
@@ -126,7 +130,7 @@ export default function MembersClient() {
   if (!hydrated) return null;
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-zinc-950">
+    <div className="flex h-[100dvh] flex-col overflow-hidden bg-zinc-950">
       {locked ? (
         <LockedBar onDone={resetFrame} />
       ) : (
