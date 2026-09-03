@@ -24,9 +24,8 @@ const PORTAL_URL =
 
 /** No parent-visible activity for this long → ask whether they're still there. */
 const IDLE_PROMPT_MS = 90_000;
-/** Unanswered prompt for this long → remount the frame for the next customer.
- *  Because the frame is credentialless, the remount drops the portal's session
- *  along with the form. */
+/** Unanswered prompt for this long → reload the page, which drops the portal's
+ *  session along with the form. See resetFrame. */
 const IDLE_GRACE_MS = 20_000;
 /** Iframe silent past this → assume framing is blocked and offer the direct link. */
 const FRAME_TIMEOUT_MS = 6_000;
@@ -36,10 +35,20 @@ const LOCK_KEY = "gd_kiosk_locked";
 export default function MembersClient() {
   const [locked, setLocked] = useState(false);
   const [hydrated, setHydrated] = useState(false);
-  // Bumped to remount the iframe — the only way to reset a cross-origin form.
-  const [frameNonce, setFrameNonce] = useState(0);
-
-  const resetFrame = useCallback(() => setFrameNonce((n) => n + 1), []);
+  /**
+   * Resets by reloading THIS DOCUMENT, not by remounting the iframe.
+   *
+   * Measured, because the distinction is the whole ballgame: a credentialless
+   * frame's ephemeral storage partition is keyed to the top-level document, so
+   * remounting the iframe hands the next customer a blank form on the PREVIOUS
+   * customer's still-live portal session. Reloading the page destroys the
+   * partition and the session with it.
+   *
+   * The lock lives in our own sessionStorage, so it survives the reload and the
+   * customer stays penned in. Fullscreen does not survive — Fully Kiosk hides
+   * the system UI at the OS level, so that costs nothing on the real tablet.
+   */
+  const resetFrame = useCallback(() => window.location.reload(), []);
 
   // Restore the lock before the customer can exploit a reload to escape it.
   useEffect(() => {
@@ -135,7 +144,7 @@ export default function MembersClient() {
       ) : (
         <StaffBar onLock={lock} />
       )}
-      <PortalFrame locked={locked} nonce={frameNonce} onReset={resetFrame} />
+      <PortalFrame locked={locked} onReset={resetFrame} />
       {locked && <StaffExit onUnlock={unlock} />}
     </div>
   );
@@ -222,49 +231,42 @@ function LockedBar({ onDone }: { onDone: () => void }) {
 
 function PortalFrame({
   locked,
-  nonce,
   onReset,
 }: {
   locked: boolean;
-  nonce: number;
   onReset: () => void;
 }) {
   const [loaded, setLoaded] = useState(false);
   const [blocked, setBlocked] = useState(false);
 
-  // A remount starts the load-watchdog over.
-  useEffect(() => {
-    setLoaded(false);
-    setBlocked(false);
-  }, [nonce]);
-
   useEffect(() => {
     if (loaded) return;
     const t = setTimeout(() => setBlocked(true), FRAME_TIMEOUT_MS);
     return () => clearTimeout(t);
-  }, [loaded, nonce]);
+  }, [loaded]);
 
   return (
     <div className="relative flex-1">
       <iframe
-        key={nonce}
         src={PORTAL_URL}
         title="iCafeCloud member portal"
         onLoad={() => setLoaded(true)}
         className="h-full w-full border-0"
-        /* Ephemeral storage partition (Chromium). The portal writes its member
-         * token to sessionStorage on cp.icafecloud.com, and sessionStorage is
-         * keyed to the TAB — so a plain remount gives a fresh form on the same
-         * session, leaking one customer's login to the next. Under
-         * credentialless the frame gets its own partition that is discarded
-         * with the element, so remounting is a genuinely clean slate.
-         * Ignored by non-Chromium browsers; Fully Kiosk's storage clearing is
-         * the backstop there. */
+        /* Ephemeral storage partition (Chromium). Without this the portal's
+         * member token would persist in sessionStorage on cp.icafecloud.com,
+         * which is keyed to the tab and outlives everything we can do.
+         *
+         * The partition is destroyed with the TOP-LEVEL DOCUMENT, not with this
+         * element — verified by experiment — which is why resetFrame reloads the
+         * page rather than remounting the frame.
+         *
+         * Ignored by non-Chromium engines; Fully Kiosk's storage clearing is the
+         * backstop there. */
         credentialless=""
       />
 
       {blocked && !loaded && <FrameFallback />}
-      {locked && <IdleReset key={nonce} onReset={onReset} />}
+      {locked && <IdleReset onReset={onReset} />}
     </div>
   );
 }

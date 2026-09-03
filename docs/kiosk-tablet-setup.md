@@ -61,10 +61,21 @@ keyed to the **tab**, not the frame — so simply reloading the iframe would giv
 the next customer a fresh form on the previous customer's session.
 
 The frame is therefore marked `credentialless` (see `MembersClient.tsx`), a
-Chromium attribute that loads it in an **ephemeral storage partition** discarded
-when the element is destroyed. Remounting on "Done" or on the idle timeout drops
-the session along with the form. Verified: the portal renders and registers
-normally under that attribute, and it does not require cross-origin isolation.
+Chromium attribute that loads it in an **ephemeral storage partition**.
+
+That partition is destroyed with the **top-level document**, NOT with the iframe
+element. Measured directly: remounting the iframe left a cross-origin child's
+sessionStorage untouched, while reloading the page gave it a fresh value. So
+"Done" and the idle timeout call `location.reload()` rather than remounting the
+frame — remounting alone produces a blank form on the previous customer's live
+session, which looks fixed and is not.
+
+The lock state lives in our own sessionStorage, so it survives the reload and the
+customer stays locked in. Fullscreen does not survive a reload; Fully Kiosk hides
+the system UI at the OS level, so this does not matter on the real tablet.
+
+Verified separately: the portal renders and registers normally under
+`credentialless`, and it does not require cross-origin isolation.
 
 The nightly Fully Kiosk clearing above is a backstop for anything the partition
 does not cover, and for non-Chromium engines where the attribute is ignored.

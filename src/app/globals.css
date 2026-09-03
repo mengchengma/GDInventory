@@ -56,15 +56,16 @@ body.kiosk-mode {
   height: 100%;
   overflow: hidden;
   overscroll-behavior: none;
-  /* Fixing the body removes any scrollable area at all, so a focus grab inside
-   * the iframe cannot scroll our header off the top. On Android Chrome 100vh is
-   * the URL-bar-hidden height, which leaves the page taller than the visible
-   * viewport and scrollable by ~60-100px — that is the header-disappears bug. */
-  position: fixed;
-  inset: 0;
 }
 
 body.kiosk-mode {
+  /* Pinning the BODY (not the root — position:fixed on <html> is legal but
+   * inconsistently handled) removes any scrollable area, so a focus grab inside
+   * the iframe cannot scroll our header off the top. On Android Chrome 100vh is
+   * the URL-bar-hidden height, which leaves the page taller than the visible
+   * viewport and scrollable by ~60-100px — the header-disappears bug. */
+  position: fixed;
+  inset: 0;
   background-image: none;
   background-attachment: scroll;
 }
