@@ -24,10 +24,9 @@ const PORTAL_URL =
 
 /** No parent-visible activity for this long → ask whether they're still there. */
 const IDLE_PROMPT_MS = 90_000;
-/** Unanswered prompt for this long → reload the frame for the next customer.
- *  NOTE: this reloads the form but does NOT clear the portal's sessionStorage,
- *  which is cross-origin. If a customer completed signup they stay logged in
- *  inside the frame. Clearing that is a Fully Kiosk Browser setting, not ours. */
+/** Unanswered prompt for this long → remount the frame for the next customer.
+ *  Because the frame is credentialless, the remount drops the portal's session
+ *  along with the form. */
 const IDLE_GRACE_MS = 20_000;
 /** Iframe silent past this → assume framing is blocked and offer the direct link. */
 const FRAME_TIMEOUT_MS = 6_000;
@@ -253,6 +252,15 @@ function PortalFrame({
         title="iCafeCloud member portal"
         onLoad={() => setLoaded(true)}
         className="h-full w-full border-0"
+        /* Ephemeral storage partition (Chromium). The portal writes its member
+         * token to sessionStorage on cp.icafecloud.com, and sessionStorage is
+         * keyed to the TAB — so a plain remount gives a fresh form on the same
+         * session, leaking one customer's login to the next. Under
+         * credentialless the frame gets its own partition that is discarded
+         * with the element, so remounting is a genuinely clean slate.
+         * Ignored by non-Chromium browsers; Fully Kiosk's storage clearing is
+         * the backstop there. */
+        credentialless=""
       />
 
       {blocked && !loaded && <FrameFallback />}

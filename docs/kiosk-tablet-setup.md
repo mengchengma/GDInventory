@@ -48,23 +48,26 @@ Free tier is sufficient. Install from Play Store, then:
 - Keep Screen On: ON
 - Screensaver / Motion Detection: OFF
 
-**Advanced Web Settings — REQUIRED**
+**Advanced Web Settings — belt and braces**
 - Clear Cache on Restart: ON
-- **Clear Cookies and Web Storage on Restart: ON**
-- Restart interval: nightly, or per session
+- Clear Cookies and Web Storage on Restart: ON
+- Restart interval: nightly
 
-### Why Fully Kiosk is required
+### How the session gets cleared between customers
 
-When a customer finishes registering, the iCafeCloud portal logs them in and
-stores a session token in `sessionStorage` on `cp.icafecloud.com`.
+When a customer finishes registering, the portal logs them in and writes a
+member token to `sessionStorage` on `cp.icafecloud.com`. `sessionStorage` is
+keyed to the **tab**, not the frame — so simply reloading the iframe would give
+the next customer a fresh form on the previous customer's session.
 
-That frame is cross-origin. Our page cannot read it, cannot clear it, and
-cannot detect that registration happened at all — reloading the iframe resets
-the *form* but leaves that session intact. **Without Fully Kiosk clearing web
-storage, one customer's logged-in account can carry over to the next.**
+The frame is therefore marked `credentialless` (see `MembersClient.tsx`), a
+Chromium attribute that loads it in an **ephemeral storage partition** discarded
+when the element is destroyed. Remounting on "Done" or on the idle timeout drops
+the session along with the form. Verified: the portal renders and registers
+normally under that attribute, and it does not require cross-origin isolation.
 
-The "Done" button and the idle prompt reset the form. Only Fully Kiosk clears
-the session.
+The nightly Fully Kiosk clearing above is a backstop for anything the partition
+does not cover, and for non-Chromium engines where the attribute is ignored.
 
 ## 4. Daily operation
 
@@ -89,7 +92,6 @@ our side:
   registration modal over it, and that modal ignores tap-outside and Escape,
   but **Cancel** and **X** still reveal the login screen behind it.
 - Registration success is undetectable, so resets are manual or idle-based.
-- The portal's session cannot be cleared by us — see above.
 
 All four disappear if registration moves to the documented iCafeCloud API
 (`api.icafecloud.com`), where the form would be ours. That path needs an admin
