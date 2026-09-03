@@ -86,7 +86,12 @@ does not cover, and for non-Chromium engines where the attribute is ignored.
 2. Staff taps **Hand to customer** — locks, goes fullscreen, holds a wake lock.
 3. Customer fills in the registration form, which opens automatically
    (`?request_type=register`).
-4. Staff taps **Done** to reset for the next person.
+4. Staff taps **Done**. The page reloads (this is what clears the session), so
+   fullscreen drops and a **Tap to begin** screen appears.
+5. The next customer taps it — that gesture restores fullscreen and reveals the
+   form. Fullscreen cannot be restored without a tap; browsers require user
+   activation. Under Fully Kiosk the system UI stays hidden regardless, so this
+   is cosmetic there.
 5. To take the tablet back: tap the bottom-right corner **5 times**, enter
    `KIOSK_EXIT_PIN`.
 

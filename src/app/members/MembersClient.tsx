@@ -32,6 +32,16 @@ const FRAME_TIMEOUT_MS = 6_000;
 
 const LOCK_KEY = "gd_kiosk_locked";
 
+/** Request fullscreen without ever throwing into the caller. */
+function goFullscreen() {
+  try {
+    void document.documentElement.requestFullscreen?.({ navigationUI: "hide" })
+      ?.catch(() => {});
+  } catch {
+    /* Permissions-Policy refusal throws synchronously — swallow it */
+  }
+}
+
 export default function MembersClient() {
   const [locked, setLocked] = useState(false);
   const [hydrated, setHydrated] = useState(false);
@@ -81,9 +91,12 @@ export default function MembersClient() {
     setLocked(true);
 
     // Must run inside this tap: browsers only grant fullscreen on a gesture.
-    document.documentElement.requestFullscreen?.({ navigationUI: "hide" }).catch(() => {
-      /* refused (desktop Safari, embedded webviews) — the page still works */
-    });
+    // try/catch as well as .catch(): under a real user activation Chrome can
+    // throw SYNCHRONOUSLY when Permissions-Policy forbids fullscreen, and an
+    // exception here aborts React's state flush — the lock would silently fail
+    // to render while sessionStorage already said "locked". Observed in
+    // testing; do not simplify to a bare .catch().
+    goFullscreen();
     void acquireWakeLock();
   }, [acquireWakeLock]);
 
@@ -146,7 +159,60 @@ export default function MembersClient() {
       )}
       <PortalFrame locked={locked} onReset={resetFrame} />
       {locked && <StaffExit onUnlock={unlock} />}
+      {locked && <TapToBegin />}
     </div>
+  );
+}
+
+/**
+ * Full-cover welcome shown while locked and out of fullscreen.
+ *
+ * Resetting between customers requires reloading the document (that is what
+ * discards the portal's session), and a reload always drops fullscreen. Getting
+ * it back needs a user gesture, so the next customer's first tap supplies one.
+ * It doubles as a clean between-customers screen rather than dumping the next
+ * person straight into a half-loaded form.
+ *
+ * Also re-arms if the customer swipes out of fullscreen mid-session.
+ */
+function TapToBegin() {
+  const [needsTap, setNeedsTap] = useState(false);
+
+  useEffect(() => {
+    const sync = () =>
+      setNeedsTap(
+        Boolean(document.fullscreenEnabled) && !document.fullscreenElement
+      );
+    sync();
+    document.addEventListener("fullscreenchange", sync);
+    return () => document.removeEventListener("fullscreenchange", sync);
+  }, []);
+
+  if (!needsTap) return null;
+
+  return (
+    <button
+      onClick={() => {
+        goFullscreen();
+        setNeedsTap(false);
+      }}
+      className="fixed inset-0 z-40 flex flex-col items-center justify-center gap-6 bg-zinc-950 px-6 text-center"
+    >
+      <div className="text-xs font-bold uppercase tracking-[0.25em] text-emerald-400">
+        Gaming Dojo
+      </div>
+      <div>
+        <div className="text-3xl font-bold tracking-tight text-zinc-50">
+          Tap to begin
+        </div>
+        <p className="mt-2 text-sm text-zinc-400">
+          Create your member account
+        </p>
+      </div>
+      <span className="mt-2 rounded-xl bg-emerald-500 px-8 py-4 text-base font-semibold text-zinc-950">
+        Get started
+      </span>
+    </button>
   );
 }
 
