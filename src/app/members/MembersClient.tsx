@@ -37,6 +37,10 @@ const LOCK_KEY = "gd_kiosk_locked";
 export default function MembersClient() {
   const [locked, setLocked] = useState(false);
   const [hydrated, setHydrated] = useState(false);
+  // Bumped to remount the iframe — the only way to reset a cross-origin form.
+  const [frameNonce, setFrameNonce] = useState(0);
+
+  const resetFrame = useCallback(() => setFrameNonce((n) => n + 1), []);
 
   // Restore the lock before the customer can exploit a reload to escape it.
   useEffect(() => {
@@ -80,8 +84,12 @@ export default function MembersClient() {
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-zinc-950">
-      {locked ? <LockedBar /> : <StaffBar onLock={lock} />}
-      <PortalFrame locked={locked} />
+      {locked ? (
+        <LockedBar onDone={resetFrame} />
+      ) : (
+        <StaffBar onLock={lock} />
+      )}
+      <PortalFrame locked={locked} nonce={frameNonce} onReset={resetFrame} />
       {locked && <StaffExit onUnlock={unlock} />}
     </div>
   );
@@ -130,49 +138,70 @@ function StaffBar({ onLock }: { onLock: () => void }) {
   );
 }
 
-/** Locked chrome — the only Gaming Dojo branding in the flow, since the framed
- *  portal renders iCafeCloud's own artwork and we cannot restyle it. */
-function LockedBar() {
+/**
+ * Locked chrome — the only Gaming Dojo branding in the flow, since the framed
+ * portal renders iCafeCloud's own artwork and we cannot restyle it.
+ *
+ * The "Done" action is here because registration success is UNDETECTABLE from
+ * this side: the portal submits over AJAX and only shows a toast, so there is
+ * no load event, no postMessage, and no readable URL. An explicit tap is the
+ * only honest signal that one customer has finished and the next can start.
+ */
+function LockedBar({ onDone }: { onDone: () => void }) {
   return (
-    <header className="shrink-0 border-b border-emerald-500/20 bg-zinc-950 px-5 py-4 text-center">
-      <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-400">
-        Gaming Dojo
+    <header className="flex shrink-0 items-center gap-3 border-b border-emerald-500/20 bg-zinc-950 px-4 py-3.5 sm:px-5">
+      <div className="min-w-0 flex-1 text-center">
+        <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-emerald-400">
+          Gaming Dojo
+        </div>
+        <h1 className="mt-0.5 text-base font-bold tracking-tight text-zinc-50 sm:text-lg">
+          Create your account
+        </h1>
+        <p className="mt-0.5 text-xs text-zinc-400">
+          Fill in the form below — then sign in at any PC.
+        </p>
       </div>
-      <h1 className="mt-1 text-lg font-bold tracking-tight text-zinc-50 sm:text-xl">
-        Create your account
-      </h1>
-      <p className="mt-1.5 text-xs text-zinc-400 sm:text-sm">
-        Fill in the form below — then sign in at any PC.
-      </p>
+
+      <button
+        onClick={onDone}
+        className="shrink-0 rounded-xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-xs font-semibold text-zinc-300 transition hover:border-emerald-500/40 hover:text-emerald-300 active:scale-95"
+      >
+        Done
+      </button>
     </header>
   );
 }
 
 // ── The portal frame ────────────────────────────────────────
 
-function PortalFrame({ locked }: { locked: boolean }) {
-  // Bumping this remounts the iframe, which is the only way to reset a
-  // cross-origin form we are not allowed to touch.
-  const [reloadKey, setReloadKey] = useState(0);
+function PortalFrame({
+  locked,
+  nonce,
+  onReset,
+}: {
+  locked: boolean;
+  nonce: number;
+  onReset: () => void;
+}) {
   const [loaded, setLoaded] = useState(false);
   const [blocked, setBlocked] = useState(false);
+
+  // A remount starts the load-watchdog over.
+  useEffect(() => {
+    setLoaded(false);
+    setBlocked(false);
+  }, [nonce]);
 
   useEffect(() => {
     if (loaded) return;
     const t = setTimeout(() => setBlocked(true), FRAME_TIMEOUT_MS);
     return () => clearTimeout(t);
-  }, [loaded, reloadKey]);
-
-  const reset = useCallback(() => {
-    setLoaded(false);
-    setBlocked(false);
-    setReloadKey((k) => k + 1);
-  }, []);
+  }, [loaded, nonce]);
 
   return (
     <div className="relative flex-1">
       <iframe
-        key={reloadKey}
+        key={nonce}
         src={PORTAL_URL}
         title="iCafeCloud member portal"
         onLoad={() => setLoaded(true)}
@@ -180,7 +209,7 @@ function PortalFrame({ locked }: { locked: boolean }) {
       />
 
       {blocked && !loaded && <FrameFallback />}
-      {locked && <IdleReset onReset={reset} />}
+      {locked && <IdleReset key={nonce} onReset={onReset} />}
     </div>
   );
 }
