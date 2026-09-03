@@ -318,7 +318,7 @@ function TopBar({
         >
           <path d="M19 12H5M12 19l-7-7 7-7" />
         </svg>
-        Back to inventory
+        Back to hub
       </Link>
 
       <div className="hidden text-center sm:block">

@@ -666,8 +666,9 @@ function TopBar({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Sections are reached through the hub, not sideways from each other. */}
           <Link
-            href="/events"
+            href="/"
             className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-1.5 text-xs font-medium text-zinc-300 transition hover:border-emerald-500/40 hover:bg-emerald-500/5 hover:text-emerald-300"
           >
             <svg
@@ -680,11 +681,9 @@ function TopBar({
               className="h-3.5 w-3.5"
               aria-hidden
             >
-              <rect x="3" y="3" width="18" height="18" rx="2" />
-              <circle cx="9" cy="9" r="2" />
-              <path d="m21 15-4.5-4.5-9 9" />
+              <path d="M19 12H5M12 19l-7-7 7-7" />
             </svg>
-            Events
+            Hub
           </Link>
           <button
             onClick={onLogout}

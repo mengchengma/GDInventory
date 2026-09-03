@@ -36,6 +36,25 @@ export function checkCredentials(username: string, password: string): boolean {
   );
 }
 
+/**
+ * PIN that releases the customer lock on /members. Compared server-side so the
+ * value never reaches the browser bundle — a customer holding the tablet can
+ * read anything the client ships.
+ *
+ * Not a security boundary on its own: the tablet's kiosk browser is what
+ * actually stops someone leaving the page. This stops the curious, not the
+ * determined.
+ */
+export function checkKioskPin(pin: string): boolean {
+  const expected = process.env.KIOSK_EXIT_PIN ?? "";
+  if (!expected) return false;
+
+  const a = Buffer.from(pin);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
+}
+
 export async function isAuthenticated(): Promise<boolean> {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
