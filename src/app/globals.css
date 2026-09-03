@@ -45,3 +45,15 @@ input[type="number"] {
 ::-webkit-scrollbar-thumb:hover {
   background: #52525b;
 }
+
+/* Kiosk route (/members). The page-level fixed-attachment gradients above smear
+ * and duplicate under a full-height cross-origin iframe — the compositor keeps
+ * stale tiles because it cannot see inside the frame to invalidate them. Chrome
+ * and Android WebView are the worst offenders, which is exactly the tablet.
+ * Flatten the background and lock the page so only the frame ever scrolls. */
+body.kiosk-mode {
+  background-image: none;
+  background-attachment: scroll;
+  overflow: hidden;
+  overscroll-behavior: none;
+}

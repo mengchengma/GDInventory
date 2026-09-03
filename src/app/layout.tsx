@@ -1,9 +1,18 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
   title: "Gaming Dojo Inventory",
   description: "Inventory tracker for Gaming Dojo",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: { capable: true, statusBarStyle: "black-translucent" },
+};
+
+export const viewport: Viewport = {
+  themeColor: "#09090b",
+  // The kiosk runs behind Android's gesture bar; keep the page under it rather
+  // than letting the browser letterbox the iframe.
+  viewportFit: "cover",
 };
 
 export default function RootLayout({

@@ -52,6 +52,18 @@ export default function MembersClient() {
     setHydrated(true);
   }, []);
 
+  // Held while locked so Android doesn't dim and sleep mid-signup. The browser
+  // drops it whenever the page is hidden, so it is re-acquired on return.
+  const wakeLock = useRef<WakeLockSentinel | null>(null);
+
+  const acquireWakeLock = useCallback(async () => {
+    try {
+      wakeLock.current = await navigator.wakeLock?.request("screen");
+    } catch {
+      /* unsupported, or denied on a non-secure origin — not fatal */
+    }
+  }, []);
+
   const lock = useCallback(() => {
     try {
       sessionStorage.setItem(LOCK_KEY, "1");
@@ -59,7 +71,13 @@ export default function MembersClient() {
       /* ignore */
     }
     setLocked(true);
-  }, []);
+
+    // Must run inside this tap: browsers only grant fullscreen on a gesture.
+    document.documentElement.requestFullscreen?.({ navigationUI: "hide" }).catch(() => {
+      /* refused (desktop Safari, embedded webviews) — the page still works */
+    });
+    void acquireWakeLock();
+  }, [acquireWakeLock]);
 
   const unlock = useCallback(() => {
     try {
@@ -68,6 +86,31 @@ export default function MembersClient() {
       /* ignore */
     }
     setLocked(false);
+
+    if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    void wakeLock.current?.release().catch(() => {});
+    wakeLock.current = null;
+  }, []);
+
+  // Android releases the wake lock on tab switch or screen-off; take it back.
+  useEffect(() => {
+    if (!locked) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void acquireWakeLock();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      void wakeLock.current?.release().catch(() => {});
+      wakeLock.current = null;
+    };
+  }, [locked, acquireWakeLock]);
+
+  // Opt this route out of the app-wide fixed-attachment background, which
+  // smears under the iframe. See body.kiosk-mode in globals.css.
+  useEffect(() => {
+    document.body.classList.add("kiosk-mode");
+    return () => document.body.classList.remove("kiosk-mode");
   }, []);
 
   // Trap the hardware back button while locked. Re-pushing on every popstate

@@ -9,7 +9,13 @@ export function middleware(req: NextRequest) {
   // /api/public/* is the unauthenticated, read-only feed consumed by the
   // marketing site (gamingdojo.co). Routes under it expose GET only.
   const isPublicApi = pathname.startsWith("/api/public/");
-  const isPublic = isLoginPage || isLoginApi || isPingApi || isPublicApi;
+  // PWA install assets. Chrome fetches these without our session cookie, so
+  // gating them breaks "Add to Home Screen" on the kiosk tablet. Neither the
+  // manifest nor the icons expose anything private.
+  const isPwaAsset =
+    pathname === "/manifest.webmanifest" || pathname.startsWith("/icon-");
+  const isPublic =
+    isLoginPage || isLoginApi || isPingApi || isPublicApi || isPwaAsset;
 
   const token = req.cookies.get("gd_auth")?.value;
   const hasSession = Boolean(token);
