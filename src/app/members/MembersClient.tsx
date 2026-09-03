@@ -6,18 +6,28 @@ import { useCallback, useEffect, useRef, useState, FormEvent } from "react";
 // ────────────────────────────────────────────────────────────
 // Register member — wraps the iCafeCloud member portal in Gaming Dojo chrome.
 //
-// The portal is a hash-router SPA on cp.icafecloud.com and registration is a
-// MODAL, not a route: the URL stays on memberPortal-login.htm when it opens.
-// So there is no deep link to the signup form, and because the frame is
-// cross-origin we cannot click it for them either. The instruction bar below
-// exists to point the customer at the link themselves.
+// ?request_type=register opens the registration modal on load, so the customer
+// never has to find the "Create a New Account" link on the sign-in screen. The
+// portal declares that modal data-backdrop="static" data-keyboard="false", so a
+// stray tap outside it won't dismiss it back to the login form.
+//
+// ?dName tags which station the signup came from — it lands in the member's
+// pc_name field.
+//
+// Everything inside the frame is cross-origin: we cannot restyle it, hide its
+// sign-in form, read what was typed, or clear its session. Those are the limits
+// of wrapping someone else's page.
 // ────────────────────────────────────────────────────────────
 
-const PORTAL_URL = "https://cp.icafecloud.com/shop/000115961189";
+const PORTAL_URL =
+  "https://cp.icafecloud.com/shop/000115961189?request_type=register&dName=Front%20Desk%20Tablet";
 
 /** No parent-visible activity for this long → ask whether they're still there. */
 const IDLE_PROMPT_MS = 90_000;
-/** Unanswered prompt for this long → wipe the form for the next customer. */
+/** Unanswered prompt for this long → reload the frame for the next customer.
+ *  NOTE: this reloads the form but does NOT clear the portal's sessionStorage,
+ *  which is cross-origin. If a customer completed signup they stay logged in
+ *  inside the frame. Clearing that is a Fully Kiosk Browser setting, not ours. */
 const IDLE_GRACE_MS = 20_000;
 /** Iframe silent past this → assume framing is blocked and offer the direct link. */
 const FRAME_TIMEOUT_MS = 6_000;
@@ -120,10 +130,8 @@ function StaffBar({ onLock }: { onLock: () => void }) {
   );
 }
 
-/**
- * Locked chrome. Doubles as the signpost for the "Create a New Account" link,
- * which is otherwise a small line of text in the middle of a login screen.
- */
+/** Locked chrome — the only Gaming Dojo branding in the flow, since the framed
+ *  portal renders iCafeCloud's own artwork and we cannot restyle it. */
 function LockedBar() {
   return (
     <header className="shrink-0 border-b border-emerald-500/20 bg-zinc-950 px-5 py-4 text-center">
@@ -133,24 +141,8 @@ function LockedBar() {
       <h1 className="mt-1 text-lg font-bold tracking-tight text-zinc-50 sm:text-xl">
         Create your account
       </h1>
-      <p className="mt-1.5 inline-flex items-center gap-1.5 text-xs text-zinc-400 sm:text-sm">
-        New here? Tap
-        <span className="font-semibold text-zinc-100">
-          &ldquo;Create a New Account&rdquo;
-        </span>
-        below
-        <svg
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          className="h-4 w-4 animate-bounce text-emerald-400"
-          aria-hidden
-        >
-          <path d="M12 5v14M19 12l-7 7-7-7" />
-        </svg>
+      <p className="mt-1.5 text-xs text-zinc-400 sm:text-sm">
+        Fill in the form below — then sign in at any PC.
       </p>
     </header>
   );
